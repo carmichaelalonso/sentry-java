@@ -2,6 +2,9 @@ package io.sentry.samples.android.navigation
 
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxScope
@@ -9,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -23,6 +27,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,7 +46,9 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
@@ -53,15 +62,20 @@ import io.sentry.android.navigation.SentryNavigationListener
 import io.sentry.compose.SentryModifier.sentryTag
 import io.sentry.compose.SentryTraced
 import io.sentry.compose.withSentryObservableEffect
-import io.sentry.samples.android.GithubAPI
+import io.sentry.samples.android.R
+import io.sentry.samples.android.RouteWorkApi
 import io.sentry.samples.android.navigation.Nav2ComposeDestination.Checkout
 import io.sentry.samples.android.navigation.Nav2ComposeDestination.Confirmation
+import io.sentry.samples.android.navigation.Nav2ComposeDestination.Custom
 import io.sentry.samples.android.navigation.Nav2ComposeDestination.Home
 import io.sentry.samples.android.navigation.Nav2ComposeDestination.ProductDetail
 import io.sentry.samples.android.navigation.Nav2ComposeDestination.ProductList
 import io.sentry.samples.android.navigation.Nav2ComposeDestination.PromoDialog
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 
@@ -71,13 +85,23 @@ internal fun Nav2ComposeApp(
   routeWorkOptions: Set<RouteWorkOption>,
   onCaptureException: () -> Unit,
   onCrashApp: () -> Unit,
+  selectedScenario: Nav2Scenario,
   onRouteChanged: (routeName: String, currentRoute: String, backStack: String) -> Unit,
+  onExitRoot: () -> Unit,
 ) {
 
   val navController = rememberNavController().withSentryObservableEffect(navListener = navListener)
   val backStack = rememberSaveableNav2ComposeBackStack()
   val shareSheetProductId = rememberSaveable { mutableStateOf<String?>(null) }
   val currentDestination = backStack.lastOrNull() ?: Home
+  var customTransactionMode by rememberSaveable {
+    mutableStateOf(Nav2CustomTransactionMode.PER_SCREEN)
+  }
+  var asyncBrowseProductsJob by rememberSaveable { mutableStateOf<Job?>(null) }
+  var isAsyncBrowseProductsRunning by rememberSaveable { mutableStateOf(false) }
+  val customTransactionsScope = androidx.compose.runtime.rememberCoroutineScope()
+  val customTransactionController =
+    androidx.compose.runtime.remember { Nav2CustomTransactionController() }
 
   fun navigateTo(destination: Nav2ComposeDestination) {
     backStack.add(destination)
@@ -108,8 +132,39 @@ internal fun Nav2ComposeApp(
     }
   }
 
-  BackHandler(enabled = shareSheetProductId.value != null) { dismissShareSheet() }
-  BackHandler(enabled = shareSheetProductId.value == null && backStack.size > 1) { navigateBack() }
+  LaunchedEffect(selectedScenario) {
+    when (selectedScenario) {
+      Nav2Scenario.COMPOSE -> {
+        customTransactionController.cleanup()
+        backStack.resetTo(Home)
+        shareSheetProductId.value = null
+        navController.navigate(Home.route) {
+          popUpTo(Home.route) { inclusive = true }
+          launchSingleTop = true
+        }
+      }
+      Nav2Scenario.CUSTOM -> {
+        backStack.resetTo(Custom)
+        shareSheetProductId.value = null
+        navController.navigate(Custom.route) {
+          popUpTo(Home.route) { inclusive = true }
+          launchSingleTop = true
+        }
+      }
+      else -> Unit
+    }
+  }
+
+  LaunchedEffect(currentDestination, customTransactionMode) {
+    if (
+      currentDestination != Custom &&
+        customTransactionMode == Nav2CustomTransactionMode.ASYNC_FROM_USER_ACTION
+    ) {
+      asyncBrowseProductsJob?.cancel()
+      asyncBrowseProductsJob = null
+      isAsyncBrowseProductsRunning = false
+    }
+  }
 
   LaunchedEffect(currentDestination, backStack.size) {
     onRouteChanged(
@@ -124,16 +179,63 @@ internal fun Nav2ComposeApp(
     routeWorkOptions = routeWorkOptions,
   )
 
+  Nav2CustomTransactionEffect(
+    selectedDestination = currentDestination,
+    mode = customTransactionMode,
+    controller = customTransactionController,
+  )
+
   Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
     Column(modifier = Modifier.fillMaxSize()) {
       NavHost(
         navController = navController,
         startDestination = Home.route,
         modifier = Modifier.weight(1f),
+        enterTransition = { fadeIn(animationSpec = tween(COMPOSE_ROUTE_TRANSITION_MILLIS)) },
+        exitTransition = { fadeOut(animationSpec = tween(COMPOSE_ROUTE_TRANSITION_MILLIS)) },
+        popEnterTransition = { fadeIn(animationSpec = tween(COMPOSE_ROUTE_TRANSITION_MILLIS)) },
+        popExitTransition = { fadeOut(animationSpec = tween(COMPOSE_ROUTE_TRANSITION_MILLIS)) },
       ) {
         composable(Home.route) {
           TracedNav2ComposeRoute(Home.routeName) {
             Nav2ComposeHomeRoute(routeSpec = Nav2RouteSpecs.home) { navigateTo(ProductList) }
+          }
+        }
+
+        composable(Custom.route) {
+          TracedNav2ComposeRoute(Custom.routeName) {
+            Nav2ComposeCustomRoute(
+              routeSpec = Nav2RouteSpecs.custom,
+              mode = customTransactionMode,
+              onModeSelected = { customTransactionMode = it },
+              isAsyncBrowseProductsRunning = isAsyncBrowseProductsRunning,
+              onBrowseProducts = {
+                if (customTransactionMode == Nav2CustomTransactionMode.ASYNC_FROM_USER_ACTION) {
+                  if (!isAsyncBrowseProductsRunning) {
+                    customTransactionController.startAsyncBrowseProductsTransaction()
+                    isAsyncBrowseProductsRunning = true
+                    asyncBrowseProductsJob = customTransactionsScope.launch {
+                      val span =
+                        Sentry.getSpan()
+                          ?.startChild(
+                            "test.navigation.async_browse_products",
+                            "Nav2 Custom async browse products",
+                          )
+                      try {
+                        delay(250)
+                        navigateTo(ProductList)
+                      } finally {
+                        span?.finish()
+                        isAsyncBrowseProductsRunning = false
+                        asyncBrowseProductsJob = null
+                      }
+                    }
+                  }
+                } else {
+                  navigateTo(ProductList)
+                }
+              },
+            )
           }
         }
 
@@ -235,6 +337,22 @@ internal fun Nav2ComposeApp(
         }
       }
 
+      // These BackHandlers are intentionally declared AFTER NavHost. NavHost installs its own
+      // internal BackHandler that pops the real NavController; if ours ran second it would let
+      // NavHost silently pop the controller while this sample's tracked back stack (which drives
+      // the
+      // header and the root-exit decision) went stale. Composing ours last gives it priority in the
+      // OnBackPressedDispatcher, so the tracked list and the NavController are only ever moved
+      // together, and backing out of the root reliably exits the activity.
+      BackHandler(enabled = shareSheetProductId.value != null) { dismissShareSheet() }
+      BackHandler(enabled = shareSheetProductId.value == null) {
+        if (backStack.size > 1) {
+          navigateBack()
+        } else {
+          onExitRoot()
+        }
+      }
+
       shareSheetProductId.value?.let { productId ->
         // This share sheet is intentionally just a screen overlay, not a Nav destination. It lets
         // the sample compare how Sentry's Nav2 integration behaves for proper Nav destinations vs.
@@ -299,7 +417,7 @@ private suspend fun runRouteWork(
     when (option) {
       RouteWorkOption.HTTP_REQUEST -> {
         try {
-          GithubAPI.service.listReposAsync("getsentry", 5)
+          RouteWorkApi.runRequest()
         } catch (e: IOException) {
           Sentry.captureException(e)
         } catch (e: HttpException) {
@@ -316,6 +434,77 @@ private suspend fun runRouteWork(
 @Composable
 private fun Nav2ComposeHomeRoute(routeSpec: Nav2RouteSpec, onBrowseProducts: () -> Unit) {
   Nav2ComposeActionRoute(routeSpec, buttons = listOf("Browse Products" to onBrowseProducts))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun Nav2ComposeCustomRoute(
+  routeSpec: Nav2RouteSpec,
+  mode: Nav2CustomTransactionMode,
+  onModeSelected: (Nav2CustomTransactionMode) -> Unit,
+  isAsyncBrowseProductsRunning: Boolean,
+  onBrowseProducts: () -> Unit,
+) {
+  val helperText =
+    when (mode) {
+      Nav2CustomTransactionMode.PER_SCREEN ->
+        "Starts a custom transaction for every destination so route work runs under app-owned screen-level transactions."
+      Nav2CustomTransactionMode.WHOLE_FLOW ->
+        "Keeps one custom transaction open for the whole shopping journey until the flow returns to the Custom home screen."
+      Nav2CustomTransactionMode.ASYNC_FROM_USER_ACTION ->
+        "This mode starts a manual transaction from the button tap, waits for async work, and then pushes Product List."
+      Nav2CustomTransactionMode.LINGERING ->
+        "The lingering transaction stays active until you leave the Custom tab."
+    }
+  val sentryPink = colorResource(R.color.colorAccent)
+
+  Nav2ComposeRouteScaffold(
+    routeSpec = routeSpec,
+    cardContent = {
+      Text("Mode", style = MaterialTheme.typography.titleSmall)
+      SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        Nav2CustomTransactionMode.entries.forEachIndexed { index, entry ->
+          SegmentedButton(
+            modifier = Modifier.weight(1f).defaultMinSize(minHeight = 72.dp),
+            shape =
+              SegmentedButtonDefaults.itemShape(
+                index = index,
+                count = Nav2CustomTransactionMode.entries.size,
+              ),
+            onClick = { onModeSelected(entry) },
+            selected = mode == entry,
+            colors =
+              SegmentedButtonDefaults.colors(
+                activeContainerColor = sentryPink,
+                activeContentColor = Color.White,
+              ),
+            icon = {},
+            label = {
+              Text(
+                text = entry.label,
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+              )
+            },
+          )
+        }
+      }
+      Text(mode.description, style = MaterialTheme.typography.bodyMedium)
+      Nav2ComposeRouteButton(
+        label =
+          if (
+            mode == Nav2CustomTransactionMode.ASYNC_FROM_USER_ACTION && isAsyncBrowseProductsRunning
+          ) {
+            "Starting async custom transaction..."
+          } else {
+            "Browse Products"
+          },
+        onClick = onBrowseProducts,
+      )
+    },
+    content = { Text(helperText, style = MaterialTheme.typography.bodyMedium) },
+  )
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -602,6 +791,7 @@ private fun Nav2ComposeRouteButton(
 private fun nav2ComposeInteractionTag(label: String): String = "Nav2 Compose $label"
 
 private const val PRODUCT_LIST_ITEM_COUNT = 20
+private const val COMPOSE_ROUTE_TRANSITION_MILLIS = 350
 
 @Composable
 private fun Nav2ComposeRouteInfo(label: String, value: String) {
@@ -651,13 +841,15 @@ private fun nav2ComposeBackStackSaver() =
 private fun List<Nav2ComposeDestination>.toComposeBackStackText(): String =
   joinToString(" -> ") { destination -> destination.backStackRoute() }
 
-private sealed class Nav2ComposeDestination(
+internal sealed class Nav2ComposeDestination(
   val routeName: String,
   val route: String,
   val arguments: Map<String, Any?> = emptyMap(),
 ) {
 
   data object Home : Nav2ComposeDestination(Nav2RouteNames.HOME, Nav2RouteNames.HOME)
+
+  data object Custom : Nav2ComposeDestination(Nav2RouteNames.CUSTOM, Nav2RouteNames.CUSTOM)
 
   data object ProductList :
     Nav2ComposeDestination(Nav2RouteNames.PRODUCT_LIST, Nav2RouteNames.PRODUCT_LIST)
@@ -712,6 +904,7 @@ private sealed class Nav2ComposeDestination(
     Bundle().apply {
       when (this@Nav2ComposeDestination) {
         Home -> putString("type", "home")
+        Custom -> putString("type", "custom")
         ProductList -> putString("type", "product_list")
         is ProductDetail -> {
           putString("type", "product_detail")
@@ -755,6 +948,7 @@ private sealed class Nav2ComposeDestination(
 private fun Bundle.toNav2ComposeDestination(): Nav2ComposeDestination {
   return when (getString("type")) {
     "home" -> Home
+    "custom" -> Custom
     "product_list" -> ProductList
     "product_detail" ->
       ProductDetail(

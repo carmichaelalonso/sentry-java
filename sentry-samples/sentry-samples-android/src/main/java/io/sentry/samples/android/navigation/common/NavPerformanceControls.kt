@@ -1,8 +1,8 @@
-package io.sentry.samples.android.navigation
+package io.sentry.samples.android.navigation.common
 
 import android.os.Build
 import android.os.Trace
-import androidx.compose.foundation.background
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -21,6 +21,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,13 +31,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 import kotlin.math.ceil
 import kotlinx.coroutines.delay
 
-internal class NavigationPerformanceState(private val measureRenderLatency: Boolean = false) {
+internal class NavigationPerformanceState(
+  private val measureRenderLatency: Boolean = false,
+  private val diagnosticsSurfaceName: String? = null,
+) {
   var stackDepth by mutableIntStateOf(30)
   var recompositionTick by mutableIntStateOf(0)
   var displayRevision by mutableIntStateOf(0)
@@ -122,14 +127,14 @@ internal class NavigationPerformanceState(private val measureRenderLatency: Bool
     displayRevision++
   }
 
-  fun nextGeneration(): Int {
-    generation++
-    return generation
-  }
-
   fun stopAutomaticWork() {
     autoRecompose = false
     autoNavigate = false
+  }
+
+  fun nextGeneration(): Int {
+    generation++
+    return generation
   }
 
   fun markRecompositionRequest() {
@@ -293,6 +298,7 @@ internal class NavigationPerformanceState(private val measureRenderLatency: Bool
     suppressNextDestinationChange = true
     pendingProcessedNavigationWork = false
     displayRevision++
+    emitDiagnosticsSummary()
   }
 
   fun cancelBenchmark(status: String = "Ready") {
@@ -307,6 +313,51 @@ internal class NavigationPerformanceState(private val measureRenderLatency: Bool
   fun benchmarkSummary(label: String): String =
     "$label: effect ${sentryNavEffectDurations.compactSummary()}, " +
       "first draw ${mutationToFirstDrawDurations.compactSummary()}"
+
+  fun diagnosticsSummary(currentRoute: String, backStack: String): String =
+    buildString {
+      appendLine("status=$benchmarkStatus")
+      appendLine("route=$currentRoute")
+      appendLine("tracked_stack=$backStack")
+      appendLine("recomposition_requests=$recompositionRequests")
+      appendLine("navigation_mutations=$navigationMutations")
+      appendLine("destination_changes=$destinationChanges")
+      appendLine("sentry_nav_effect_attempts=$sentryNavEffectAttempts")
+      appendLine("processed_calls=$sentryNavEffectProcessedCalls")
+      appendLine("captured_entries_resolved=$capturedEntriesResolved")
+      appendLine("name_extractor_calls=$nameExtractorCalls")
+      appendLine("arguments_extractor_calls=$argumentsExtractorCalls")
+      appendLine("name_extractor_avg=${nameExtractorAverageMicros()}")
+      appendLine("arguments_extractor_avg=${argumentsExtractorAverageMicros()}")
+      appendLine("sentry_nav_effect_duration=${sentryNavEffectDurationSummary()}")
+      appendLine("extractor_duration=${extractorDurationSummary()}")
+      appendLine("non_extractor_estimate=${nonExtractorDurationSummary()}")
+      appendLine("mutation_to_composition=${mutationToCompositionSummary()}")
+      appendLine("mutation_to_first_draw=${mutationToFirstDrawSummary()}")
+      appendLine("first_draws_over_8_3_ms=${firstDrawsOver8Millis()}")
+      appendLine("first_draws_over_16_7_ms=${firstDrawsOver16Millis()}")
+      comparisonResult?.let { append("ab_result=$it") }
+    }
+
+  private fun emitDiagnosticsSummary() {
+    val surface = diagnosticsSurfaceName ?: return
+    Log.i(NAV_PERF_TAG, "NAV_PERF_DIAGNOSTICS_START surface=$surface")
+    diagnosticsSummary(currentRoute = "<runtime>", backStack = "<runtime>")
+      .trimEnd()
+      .lineSequence()
+      .forEach { line -> Log.i(NAV_PERF_TAG, line) }
+    Log.i(NAV_PERF_TAG, "NAV_PERF_DIAGNOSTICS_END surface=$surface")
+  }
+
+  fun publishDiagnostics(currentRoute: String, backStack: String) {
+    val surface = diagnosticsSurfaceName ?: return
+    Log.i(NAV_PERF_TAG, "NAV_PERF_DIAGNOSTICS_START surface=$surface")
+    diagnosticsSummary(currentRoute = currentRoute, backStack = backStack)
+      .trimEnd()
+      .lineSequence()
+      .forEach { line -> Log.i(NAV_PERF_TAG, line) }
+    Log.i(NAV_PERF_TAG, "NAV_PERF_DIAGNOSTICS_END surface=$surface")
+  }
 
   fun nextAbComparisonRunsDisabledFirst(): Boolean = abComparisonCount++ % 2 == 0
 
@@ -583,13 +634,15 @@ internal fun NavigationPerformancePanel(
   currentRoute: String,
   backStack: String,
   state: NavigationPerformanceState,
-  showExtractorControls: Boolean = false,
+  showExtractorControls: Boolean,
   onBuildStack: () -> Unit,
   onMutateLowerEntry: (() -> Unit)? = null,
   onReplaceTop: () -> Unit,
   nav3Controls: Nav3PerformanceControls? = null,
 ) {
   @Suppress("UNUSED_EXPRESSION") state.displayRevision
+
+  val diagnosticsSummary = state.diagnosticsSummary(currentRoute = currentRoute, backStack = backStack)
 
   LaunchedEffect(state.autoRecompose) {
     while (state.autoRecompose) {
@@ -608,27 +661,66 @@ internal fun NavigationPerformancePanel(
   }
 
   Column(
-    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+    modifier =
+      Modifier.fillMaxSize()
+        .verticalScroll(rememberScrollState())
+        .padding(16.dp)
+        .testTag(navPerformanceTag("root")),
     verticalArrangement = Arrangement.spacedBy(12.dp),
   ) {
-    Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-    Text(description, style = MaterialTheme.typography.bodyMedium)
-    if (nav3Controls != null) {
-      PerfInfoRow("Benchmark status", state.benchmarkStatus)
+    Text(
+      title,
+      style = MaterialTheme.typography.headlineMedium,
+      fontWeight = FontWeight.Bold,
+      color = MaterialTheme.colorScheme.onBackground,
+    )
+    Text(
+      description,
+      style = MaterialTheme.typography.bodyMedium,
+      color = MaterialTheme.colorScheme.onBackground,
+    )
+    PerfInfoRow(
+      "Benchmark status",
+      state.benchmarkStatus,
+      tag = navPerformanceTag("benchmark_status"),
+    )
+    if (!state.benchmarkRunning) {
+      PerfInfoRow(
+        "Diagnostics summary",
+        diagnosticsSummary,
+        tag = navPerformanceTag("diagnostics_summary_top"),
+      )
     }
 
-    PerfCard(title = "Current State") {
-      PerfInfoRow("Current route", currentRoute)
-      PerfInfoRow("Tracked stack", backStack)
+    PerfCard(title = "Current State", tag = navPerformanceTag("current_state_card")) {
+      PerfInfoRow("Current route", currentRoute, tag = navPerformanceTag("current_route"))
+      PerfInfoRow("Tracked stack", backStack, tag = navPerformanceTag("tracked_stack"))
       nav3Controls?.let { controls ->
-        PerfInfoRow("Actual stack entries", controls.actualStackEntries.toString())
-        PerfInfoRow("Requested stack depth", state.stackDepth.toString())
-        PerfInfoRow("Integration mode", state.integrationMode.label)
+        PerfInfoRow(
+          "Actual stack entries",
+          controls.actualStackEntries.toString(),
+          tag = navPerformanceTag("actual_stack_entries"),
+        )
+        PerfInfoRow(
+          "Requested stack depth",
+          state.stackDepth.toString(),
+          tag = navPerformanceTag("requested_stack_depth"),
+        )
+        PerfInfoRow(
+          "Integration mode",
+          state.integrationMode.label,
+          tag = navPerformanceTag("integration_mode"),
+        )
         PerfInfoRow(
           "Capture enabled",
           if (state.integrationMode.captureBackStack) "Yes" else "No",
+          tag = navPerformanceTag("capture_enabled"),
         )
-        PerfInfoRow("Capture limit", controls.maxCapturedBackStackEntries.toString())
+        PerfInfoRow(
+          "Capture limit",
+          controls.maxCapturedBackStackEntries.toString(),
+          tag = navPerformanceTag("capture_limit"),
+        )
         PerfInfoRow(
           "Effective captured entries",
           if (state.integrationMode.captureBackStack) {
@@ -636,19 +728,22 @@ internal fun NavigationPerformancePanel(
           } else {
             "0"
           },
+          tag = navPerformanceTag("effective_captured_entries"),
         )
       }
     }
 
     nav3Controls?.let { controls ->
-      PerfCard(title = "Scenarios") {
+      PerfCard(title = "Scenarios", tag = navPerformanceTag("scenarios_card")) {
         NavigationPerformancePreset.entries.chunked(2).forEach { presets ->
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             presets.forEach { preset ->
               OutlinedButton(
                 enabled = !state.benchmarkRunning,
                 onClick = { controls.onApplyPreset(preset) },
-                modifier = Modifier.weight(1f),
+                modifier =
+                  Modifier.weight(1f)
+                    .testTag(navPerformanceTag("preset_${preset.name.lowercase()}")),
               ) {
                 Text(preset.label)
               }
@@ -660,7 +755,7 @@ internal fun NavigationPerformancePanel(
         }
       }
 
-      PerfCard(title = "Nav3 Integration") {
+      PerfCard(title = "Nav3 Integration", tag = navPerformanceTag("integration_card")) {
         PerfModeRow(
           label = "Mode",
           selectedLabel = state.integrationMode.label,
@@ -676,7 +771,7 @@ internal fun NavigationPerformancePanel(
           enabled = !state.benchmarkRunning,
           onDecrement = {
             controls.onMaxCapturedBackStackEntriesChange(
-              (controls.maxCapturedBackStackEntries - 1).coerceAtLeast(1)
+              (controls.maxCapturedBackStackEntries - 1).coerceAtLeast(0)
             )
           },
           onIncrement = {
@@ -688,7 +783,7 @@ internal fun NavigationPerformancePanel(
       }
     }
 
-    PerfCard(title = "Stress Controls") {
+    PerfCard(title = "Stress Controls", tag = navPerformanceTag("stress_controls_card")) {
       PerfStepper(
         label = "Stack depth",
         value = state.stackDepth,
@@ -751,17 +846,20 @@ internal fun NavigationPerformancePanel(
     }
 
     nav3Controls?.let { controls ->
-      PerfCard(title = "Fixed Runs") {
+      PerfCard(title = "Fixed Runs", tag = navPerformanceTag("fixed_runs_card")) {
         NavigationPerformanceRun.entries.forEach { run ->
           Button(
             enabled = !state.benchmarkRunning,
             onClick = { controls.onRunBenchmark(run) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier =
+              Modifier.fillMaxWidth().testTag(navPerformanceTag("run_${run.name.lowercase()}")),
           ) {
             Text(run.label)
           }
         }
-        state.comparisonResult?.let { result -> PerfInfoRow("A/B result", result) }
+        state.comparisonResult?.let { result ->
+          PerfInfoRow("A/B result", result, tag = navPerformanceTag("ab_result"))
+        }
       }
     }
 
@@ -788,33 +886,100 @@ internal fun NavigationPerformancePanel(
       }
     }
 
-    PerfCard(title = "Counters") {
-      PerfInfoRow("Recomposition requests", state.recompositionRequests.toString())
-      PerfInfoRow("Navigation mutations", state.navigationMutations.toString())
-      PerfInfoRow("Destination changes", state.destinationChanges.toString())
+    PerfCard(title = "Counters", tag = navPerformanceTag("counters_card")) {
+      PerfInfoRow(
+        "Recomposition requests",
+        state.recompositionRequests.toString(),
+        tag = navPerformanceTag("recomposition_requests"),
+      )
+      PerfInfoRow(
+        "Navigation mutations",
+        state.navigationMutations.toString(),
+        tag = navPerformanceTag("navigation_mutations"),
+      )
+      PerfInfoRow(
+        "Destination changes",
+        state.destinationChanges.toString(),
+        tag = navPerformanceTag("destination_changes"),
+      )
       if (showExtractorControls) {
         if (state.benchmarkRunning) {
           Text("Metrics are published when the fixed run completes.")
         } else {
-          PerfInfoRow("SentryNavEffect attempts", state.sentryNavEffectAttempts.toString())
-          PerfInfoRow("Calls with extractor work", state.sentryNavEffectProcessedCalls.toString())
-          PerfInfoRow("Captured entries resolved", state.capturedEntriesResolved.toString())
-          PerfInfoRow("nameExtractor calls", state.nameExtractorCalls.toString())
-          PerfInfoRow("argumentsExtractor calls", state.argumentsExtractorCalls.toString())
-          PerfInfoRow("nameExtractor avg", state.nameExtractorAverageMicros())
-          PerfInfoRow("argumentsExtractor avg", state.argumentsExtractorAverageMicros())
-          PerfInfoRow("SentryNavEffect duration", state.sentryNavEffectDurationSummary())
-          PerfInfoRow("Extractor duration", state.extractorDurationSummary())
-          PerfInfoRow("Non-extractor estimate", state.nonExtractorDurationSummary())
-          PerfInfoRow("Mutation to composition", state.mutationToCompositionSummary())
-          PerfInfoRow("Mutation to first draw", state.mutationToFirstDrawSummary())
+          PerfInfoRow(
+            "SentryNavEffect attempts",
+            state.sentryNavEffectAttempts.toString(),
+            tag = navPerformanceTag("sentry_nav_effect_attempts"),
+          )
+          PerfInfoRow(
+            "Calls with extractor work",
+            state.sentryNavEffectProcessedCalls.toString(),
+            tag = navPerformanceTag("calls_with_extractor_work"),
+          )
+          PerfInfoRow(
+            "Captured entries resolved",
+            state.capturedEntriesResolved.toString(),
+            tag = navPerformanceTag("captured_entries_resolved"),
+          )
+          PerfInfoRow(
+            "nameExtractor calls",
+            state.nameExtractorCalls.toString(),
+            tag = navPerformanceTag("name_extractor_calls"),
+          )
+          PerfInfoRow(
+            "argumentsExtractor calls",
+            state.argumentsExtractorCalls.toString(),
+            tag = navPerformanceTag("arguments_extractor_calls"),
+          )
+          PerfInfoRow(
+            "nameExtractor avg",
+            state.nameExtractorAverageMicros(),
+            tag = navPerformanceTag("name_extractor_avg"),
+          )
+          PerfInfoRow(
+            "argumentsExtractor avg",
+            state.argumentsExtractorAverageMicros(),
+            tag = navPerformanceTag("arguments_extractor_avg"),
+          )
+          PerfInfoRow(
+            "SentryNavEffect duration",
+            state.sentryNavEffectDurationSummary(),
+            tag = navPerformanceTag("sentry_nav_effect_duration"),
+          )
+          PerfInfoRow(
+            "Extractor duration",
+            state.extractorDurationSummary(),
+            tag = navPerformanceTag("extractor_duration"),
+          )
+          PerfInfoRow(
+            "Non-extractor estimate",
+            state.nonExtractorDurationSummary(),
+            tag = navPerformanceTag("non_extractor_estimate"),
+          )
+          PerfInfoRow(
+            "Mutation to composition",
+            state.mutationToCompositionSummary(),
+            tag = navPerformanceTag("mutation_to_composition"),
+          )
+          PerfInfoRow(
+            "Mutation to first draw",
+            state.mutationToFirstDrawSummary(),
+            tag = navPerformanceTag("mutation_to_first_draw"),
+          )
           PerfInfoRow(
             "First draws over 8.3 ms",
             state.firstDrawsOver8Millis().toString(),
+            tag = navPerformanceTag("first_draws_over_8_3_ms"),
           )
           PerfInfoRow(
             "First draws over 16.7 ms",
             state.firstDrawsOver16Millis().toString(),
+            tag = navPerformanceTag("first_draws_over_16_7_ms"),
+          )
+          PerfInfoRow(
+            "Diagnostics summary",
+            diagnosticsSummary,
+            tag = navPerformanceTag("diagnostics_summary"),
           )
         }
       }
@@ -825,15 +990,26 @@ internal fun NavigationPerformancePanel(
       ) {
         Text("Reset Counters")
       }
+      Button(
+        enabled = !state.benchmarkRunning,
+        onClick = { state.publishDiagnostics(currentRoute = currentRoute, backStack = backStack) },
+        modifier = Modifier.fillMaxWidth().testTag(navPerformanceTag("publish_diagnostics")),
+      ) {
+        Text("Publish diagnostics")
+      }
     }
   }
 }
 
 @Composable
-private fun PerfCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+private fun PerfCard(
+  title: String,
+  tag: String? = null,
+  content: @Composable ColumnScope.() -> Unit,
+) {
   Card(
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    modifier = Modifier.fillMaxWidth(),
+    modifier = Modifier.fillMaxWidth().then(if (tag != null) Modifier.testTag(tag) else Modifier),
   ) {
     Column(
       modifier = Modifier.padding(16.dp),
@@ -846,20 +1022,36 @@ private fun PerfCard(title: String, content: @Composable ColumnScope.() -> Unit)
 }
 
 @Composable
-private fun PerfInfoRow(label: String, value: String) {
-  Row(
-    modifier =
-      Modifier.fillMaxWidth()
-        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
-        .padding(12.dp),
-    horizontalArrangement = Arrangement.SpaceBetween,
-    verticalAlignment = Alignment.CenterVertically,
+private fun PerfInfoRow(label: String, value: String, tag: String? = null) {
+  Surface(
+    color = MaterialTheme.colorScheme.surface,
+    shape = RoundedCornerShape(8.dp),
+    modifier = Modifier.fillMaxWidth().then(if (tag != null) Modifier.testTag(tag) else Modifier),
   ) {
-    Text(label, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-    Spacer(Modifier.size(12.dp))
-    Text(value, modifier = Modifier.weight(1f))
+    Row(
+      modifier = Modifier.padding(12.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        label,
+        fontWeight = FontWeight.Bold,
+        modifier =
+          Modifier.weight(1f)
+            .then(if (tag != null) Modifier.testTag("${tag}_label") else Modifier),
+      )
+      Spacer(Modifier.size(12.dp))
+      Text(
+        value,
+        modifier =
+          Modifier.weight(1f)
+            .then(if (tag != null) Modifier.testTag("${tag}_value") else Modifier),
+      )
+    }
   }
 }
+
+private fun navPerformanceTag(name: String): String = "navigation_perf_$name"
 
 @Composable
 private fun PerfStepper(
@@ -1047,3 +1239,4 @@ private const val SENTRY_NAV_EFFECT_SECTION = "Nav3Stress.SentryNavEffect"
 private const val SENTRY_NAV_EFFECT_WARM_UP_SECTION = "Nav3Stress.SentryNavEffect.warmup"
 private const val AB_DISABLED_SECTION = "Nav3Stress.ab.disabled"
 private const val AB_ENABLED_SECTION = "Nav3Stress.ab.enabled"
+private const val NAV_PERF_TAG = "NavPerformance"

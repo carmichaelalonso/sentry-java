@@ -15,7 +15,7 @@ public abstract interface class io/sentry/compose/navigation3/RouteNameExtractor
 }
 
 public final class io/sentry/compose/navigation3/SentryNavEffectKt {
-	public static final fun SentryNavEffect (Ljava/util/List;Lio/sentry/compose/navigation3/RouteNameExtractor;Lio/sentry/compose/navigation3/RouteArgumentsExtractor;Lio/sentry/compose/navigation3/SentryNavOptions;Landroidx/compose/runtime/Composer;II)V
+	public static final fun SentryNavEffect (Ljava/util/List;Lio/sentry/IScopes;Lio/sentry/compose/navigation3/SentryNavOptions;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;Landroidx/compose/runtime/Composer;II)V
 }
 
 public final class io/sentry/compose/navigation3/SentryNavOptions {

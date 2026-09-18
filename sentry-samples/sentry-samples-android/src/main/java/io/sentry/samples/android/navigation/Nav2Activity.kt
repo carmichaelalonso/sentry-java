@@ -33,11 +33,11 @@ import androidx.navigation.fragment.NavHostFragment
 import io.sentry.Sentry
 import io.sentry.SpanStatus
 import io.sentry.android.navigation.SentryNavigationListener
-import io.sentry.samples.android.GithubAPI
 import io.sentry.samples.android.R
-import io.sentry.samples.android.Repo
+import io.sentry.samples.android.RouteWorkApi
 import io.sentry.samples.android.navigation.Nav2Destination.Home
 import io.sentry.samples.android.navigation.Nav2Destination.Landing
+import okhttp3.ResponseBody
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -69,10 +69,10 @@ class Nav2Activity : AppCompatActivity() {
   private lateinit var previousConfig: Nav2SampleConfigSnapshot
 
   // Top bar config
-  private val routeWorkOptions =
-    mutableStateOf(setOf(RouteWorkOption.HTTP_REQUEST, RouteWorkOption.MANUAL_CHILD_SPAN))
+  private val routeWorkOptions = mutableStateOf(setOf(RouteWorkOption.MANUAL_CHILD_SPAN))
   private lateinit var topBar: Nav2TopBar
   private var activeScenario = Nav2Scenario.COMPOSE
+  private val composeScenario = mutableStateOf(Nav2Scenario.COMPOSE)
 
   // Main content
   private lateinit var contentHosts: Nav2ContentHosts
@@ -203,9 +203,11 @@ class Nav2Activity : AppCompatActivity() {
             routeWorkOptions = routeWorkOptions.value,
             onCaptureException = { captureSampleException("Nav2") },
             onCrashApp = { showCrashConfirmation("Nav2") },
+            selectedScenario = composeScenario.value,
             onRouteChanged = { _, currentRoute, backStack ->
               updateComposeNavigationUi(currentRoute, backStack)
             },
+            onExitRoot = { finish() },
           )
         }
       }
@@ -324,6 +326,7 @@ class Nav2Activity : AppCompatActivity() {
 
   private fun openScenario(scenario: Nav2Scenario) {
     activeScenario = scenario
+    composeScenario.value = scenario
     topBar.select(activeScenario)
     performanceState.stopAutomaticWork()
     when (scenario) {
@@ -334,7 +337,14 @@ class Nav2Activity : AppCompatActivity() {
           navController.currentBackStackEntry?.arguments,
         )
       }
-      Nav2Scenario.COMPOSE -> contentHosts.showCompose()
+      Nav2Scenario.COMPOSE -> {
+        contentHosts.showCompose()
+        updateComposeNavigationUi("/${Nav2RouteNames.HOME}", "/${Nav2RouteNames.HOME}")
+      }
+      Nav2Scenario.CUSTOM -> {
+        contentHosts.showCompose()
+        updateComposeNavigationUi("/${Nav2RouteNames.CUSTOM}", "/${Nav2RouteNames.CUSTOM}")
+      }
       Nav2Scenario.FRAGMENTS -> {
         contentHosts.showFragments()
         resetToHome()
@@ -369,20 +379,18 @@ class Nav2Activity : AppCompatActivity() {
 
       when (option) {
         RouteWorkOption.HTTP_REQUEST -> {
-          GithubAPI.service
-            .listRepos("getsentry")
-            .enqueue(
-              object : Callback<List<Repo>> {
-                override fun onResponse(call: Call<List<Repo>>, response: Response<List<Repo>>) {
-                  Thread { Sentry.flush(SENTRY_FLUSH_TIMEOUT_MILLIS) }.start()
-                }
-
-                override fun onFailure(call: Call<List<Repo>>, t: Throwable) {
-                  Sentry.captureException(t)
-                  Thread { Sentry.flush(SENTRY_FLUSH_TIMEOUT_MILLIS) }.start()
-                }
+          RouteWorkApi.enqueueRequest(
+            object : Callback<ResponseBody> {
+              override fun onResponse(call: Call<ResponseBody>, response: Response<ResponseBody>) {
+                Thread { Sentry.flush(SENTRY_FLUSH_TIMEOUT_MILLIS) }.start()
               }
-            )
+
+              override fun onFailure(call: Call<ResponseBody>, t: Throwable) {
+                Sentry.captureException(t)
+                Thread { Sentry.flush(SENTRY_FLUSH_TIMEOUT_MILLIS) }.start()
+              }
+            }
+          )
         }
 
         RouteWorkOption.MANUAL_CHILD_SPAN -> recordManualChildSpan(routeName)
@@ -474,7 +482,9 @@ class Nav2Activity : AppCompatActivity() {
 
   private fun updateComposeNavigationUi(currentRoute: String, backStack: String) {
     topBar.update(
-      scenario = Nav2Scenario.COMPOSE,
+      scenario =
+        if (currentRoute.startsWith("/${Nav2RouteNames.CUSTOM}")) Nav2Scenario.CUSTOM
+        else Nav2Scenario.COMPOSE,
       currentRoute = currentRoute,
       backStack = backStack,
     )
