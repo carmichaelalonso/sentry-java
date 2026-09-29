@@ -19,7 +19,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -28,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -679,15 +682,18 @@ internal fun NavigationPerformancePanel(
       style = MaterialTheme.typography.bodyMedium,
       color = MaterialTheme.colorScheme.onBackground,
     )
-    PerfInfoRow(
-      "Benchmark status",
-      state.benchmarkStatus,
+    CollapsiblePerfInfoRow(
+      label = "Benchmark status",
+      value = state.benchmarkStatus,
+      collapsedValue = state.benchmarkStatus,
       tag = navPerformanceTag("benchmark_status"),
+      defaultExpanded = state.benchmarkRunning,
     )
     if (!state.benchmarkRunning) {
-      PerfInfoRow(
-        "Diagnostics summary",
-        diagnosticsSummary,
+      CollapsiblePerfInfoRow(
+        label = "Diagnostics summary",
+        value = diagnosticsSummary,
+        collapsedValue = diagnosticsSummary.lineSequence().firstOrNull() ?: diagnosticsSummary,
         tag = navPerformanceTag("diagnostics_summary_top"),
       )
     }
@@ -976,11 +982,6 @@ internal fun NavigationPerformancePanel(
             state.firstDrawsOver16Millis().toString(),
             tag = navPerformanceTag("first_draws_over_16_7_ms"),
           )
-          PerfInfoRow(
-            "Diagnostics summary",
-            diagnosticsSummary,
-            tag = navPerformanceTag("diagnostics_summary"),
-          )
         }
       }
       Button(
@@ -1044,6 +1045,50 @@ private fun PerfInfoRow(label: String, value: String, tag: String? = null) {
         value,
         modifier =
           Modifier.weight(1f).then(if (tag != null) Modifier.testTag("${tag}_value") else Modifier),
+      )
+    }
+  }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CollapsiblePerfInfoRow(
+  label: String,
+  value: String,
+  collapsedValue: String,
+  tag: String? = null,
+  defaultExpanded: Boolean = false,
+) {
+  var expanded by remember(label, value) { mutableStateOf(defaultExpanded) }
+  Surface(
+    color = MaterialTheme.colorScheme.surface,
+    shape = RoundedCornerShape(8.dp),
+    modifier = Modifier.fillMaxWidth().then(if (tag != null) Modifier.testTag(tag) else Modifier),
+    onClick = { expanded = !expanded },
+  ) {
+    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+      ) {
+        Text(
+          label,
+          fontWeight = FontWeight.Bold,
+          modifier =
+            Modifier.weight(1f)
+              .then(if (tag != null) Modifier.testTag("${tag}_label") else Modifier),
+        )
+        TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {
+          Text(if (expanded) "Collapse" else "Expand")
+        }
+      }
+      Text(
+        if (expanded) value else collapsedValue,
+        style = MaterialTheme.typography.bodyMedium,
+        modifier =
+          Modifier.fillMaxWidth()
+            .then(if (tag != null) Modifier.testTag("${tag}_value") else Modifier),
       )
     }
   }

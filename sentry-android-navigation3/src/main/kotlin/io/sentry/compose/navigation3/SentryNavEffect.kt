@@ -20,8 +20,8 @@ import org.jetbrains.annotations.ApiStatus
  *
  *    // Place SentryNavEffect in the same composable as your NavDisplay and call
  *    // the effect first. Doing so ensures the effect's lifecycle matches your
- *    // NavDisplay, and that any Sentry data produced by your nav destinations
- *    // get attributed to the appropriate nav transaction.
+ *    // NavDisplay, and that any Sentry data produced by your initial nav
+ *    // destination gets attributed to the appropriate nav transaction.
  *    SentryNavEffect(
  *      backStack = navBackStack,
  *      nameExtractor = { route -> route.extractName() },

@@ -615,7 +615,7 @@ class Nav2Activity : AppCompatActivity() {
   }
 
   internal fun captureSampleException(navName: String) {
-    Sentry.captureException(RuntimeException("$navName sample exception button"))
+    Sentry.captureException(RuntimeException("$navName sample capture exception button"))
     Thread { Sentry.flush(SENTRY_FLUSH_TIMEOUT_MILLIS) }.start()
   }
 
@@ -629,7 +629,7 @@ class Nav2Activity : AppCompatActivity() {
   }
 
   private fun crashSampleApp(navName: String): Nothing {
-    throw RuntimeException("Fatal $navName sample crash button")
+    throw RuntimeException("Fatal $navName sample crash app button")
   }
 
   private val Int.dp: Int
