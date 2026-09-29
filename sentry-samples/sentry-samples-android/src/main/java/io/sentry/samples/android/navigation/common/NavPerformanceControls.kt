@@ -21,10 +21,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -380,9 +380,6 @@ internal class NavigationPerformanceState(
     pendingAbPhase?.let { phase -> endAsyncTraceSection(phase.sectionName, phase.cookie) }
     pendingAbPhase = null
   }
-
-  fun sentryNavEffectTraceSection(): String =
-    if (collectMeasurements) SENTRY_NAV_EFFECT_SECTION else SENTRY_NAV_EFFECT_WARM_UP_SECTION
 
   fun sentryNavEffectDurationSummary(): String = sentryNavEffectDurations.summary()
 
@@ -1278,8 +1275,6 @@ private fun endAsyncTraceSection(sectionName: String, cookie: Int) {
 
 private const val NAVIGATION_TO_COMPOSITION_SECTION = "Nav3Stress.navigationToComposition"
 private const val NAVIGATION_TO_FIRST_DRAW_SECTION = "Nav3Stress.navigationToFirstDraw"
-private const val SENTRY_NAV_EFFECT_SECTION = "Nav3Stress.SentryNavEffect"
-private const val SENTRY_NAV_EFFECT_WARM_UP_SECTION = "Nav3Stress.SentryNavEffect.warmup"
 private const val AB_DISABLED_SECTION = "Nav3Stress.ab.disabled"
 private const val AB_ENABLED_SECTION = "Nav3Stress.ab.enabled"
 private const val NAV_PERF_TAG = "NavPerformance"

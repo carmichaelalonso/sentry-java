@@ -1,5 +1,7 @@
 package io.sentry.compose.navigation3
 
+import android.os.Build
+import android.os.Trace
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
@@ -112,7 +114,18 @@ internal fun <T : Any> SentryNavEffect(
   val copy = backStack.toList()
 
   DisposableEffect(observer, BackStackKey(copy)) {
-    observer.onBackStackChanged(backStack = copy)
+    // Trace the observer work here: DisposableEffect runs after SentryNavEffect returns.
+    val traceEnabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && Trace.isEnabled()
+    if (traceEnabled) {
+      Trace.beginSection(SENTRY_NAV_EFFECT_TRACE_SECTION)
+    }
+    try {
+      observer.onBackStackChanged(backStack = copy)
+    } finally {
+      if (traceEnabled) {
+        Trace.endSection()
+      }
+    }
     onDispose {}
   }
 
@@ -120,3 +133,5 @@ internal fun <T : Any> SentryNavEffect(
     onDispose { observer.cleanup() }
   }
 }
+
+private const val SENTRY_NAV_EFFECT_TRACE_SECTION = "SentryNavEffect.onBackStackChanged"

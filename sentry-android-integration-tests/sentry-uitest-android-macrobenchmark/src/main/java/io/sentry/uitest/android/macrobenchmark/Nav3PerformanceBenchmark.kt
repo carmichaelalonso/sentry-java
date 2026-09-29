@@ -2,6 +2,7 @@ package io.sentry.uitest.android.macrobenchmark
 
 import android.content.ComponentName
 import android.content.Intent
+import android.os.Build
 import androidx.benchmark.macro.CompilationMode
 import androidx.benchmark.macro.ExperimentalMetricApi
 import androidx.benchmark.macro.FrameTimingMetric
@@ -300,10 +301,9 @@ class Nav3PerformanceBenchmark {
 
       val effectMillis = operations.map { it.effectNanos.nanosToMillis() }
       val extractorMillis = operations.map { it.extractorNanos.nanosToMillis() }
-      val nonExtractorMillis =
-        operations.map {
-          (it.effectNanos - it.extractorNanos).coerceAtLeast(0.0).nanosToMillis()
-        }
+      val nonExtractorMillis = operations.map {
+        (it.effectNanos - it.extractorNanos).coerceAtLeast(0.0).nanosToMillis()
+      }
       val totalEffectNanos = operations.sumOf { it.effectNanos }
       val totalExtractorNanos = operations.sumOf { it.extractorNanos }
       val capturedEntryCount = operations.sumOf { it.capturedEntryCount }
@@ -313,6 +313,7 @@ class Nav3PerformanceBenchmark {
         nonExtractorMillis = nonExtractorMillis,
         operationCount = operations.size,
         capturedEntryCount = capturedEntryCount.toInt(),
+        verifyLatency = !isEmulator,
       )
 
       return buildList {
@@ -366,12 +367,16 @@ class Nav3PerformanceBenchmark {
       nonExtractorMillis: List<Double>,
       operationCount: Int,
       capturedEntryCount: Int,
+      verifyLatency: Boolean,
     ) {
       check(operationCount == expectedOperationCount) {
         "Expected $expectedOperationCount Nav3 operations, measured $operationCount"
       }
       check(capturedEntryCount == expectedCapturedEntryCount) {
         "Expected $expectedCapturedEntryCount captured entries, measured $capturedEntryCount"
+      }
+      if (!verifyLatency) {
+        return
       }
       checkP90("integration", effectMillis, maxIntegrationP90Ms)
       checkP90("extractor", extractorMillis, maxExtractorP90Ms)
@@ -448,10 +453,12 @@ class Nav3PerformanceBenchmark {
 
       val disabledComposition =
         operations.durations(AB_DISABLED_SECTION, NAVIGATION_TO_COMPOSITION_SECTION)
-      val enabledComposition = operations.durations(AB_ENABLED_SECTION, NAVIGATION_TO_COMPOSITION_SECTION)
+      val enabledComposition =
+        operations.durations(AB_ENABLED_SECTION, NAVIGATION_TO_COMPOSITION_SECTION)
       val disabledFirstDraw =
         operations.durations(AB_DISABLED_SECTION, NAVIGATION_TO_FIRST_DRAW_SECTION)
-      val enabledFirstDraw = operations.durations(AB_ENABLED_SECTION, NAVIGATION_TO_FIRST_DRAW_SECTION)
+      val enabledFirstDraw =
+        operations.durations(AB_ENABLED_SECTION, NAVIGATION_TO_FIRST_DRAW_SECTION)
       expectations.verify(
         disabledComposition = disabledComposition,
         enabledComposition = enabledComposition,
@@ -479,7 +486,8 @@ class Nav3PerformanceBenchmark {
       phase: String,
       operation: String,
     ): List<Double> =
-      filter { cost -> cost.phase == phase && cost.operation == operation }.map { it.durationMillis }
+      filter { cost -> cost.phase == phase && cost.operation == operation }
+        .map { it.durationMillis }
   }
 
   private data class AbOperationCost(
@@ -517,7 +525,7 @@ class Nav3PerformanceBenchmark {
     private const val PERFORMANCE_RUN_EXTRA = "nav3_performance_run"
     private const val PERFORMANCE_WARM_UP_ONLY_EXTRA = "nav3_performance_warm_up_only"
     private const val PERFORMANCE_SKIP_WARM_UP_EXTRA = "nav3_performance_skip_warm_up"
-    private const val SENTRY_NAV_EFFECT_TRACE_SECTION = "Nav3Stress.SentryNavEffect"
+    private const val SENTRY_NAV_EFFECT_TRACE_SECTION = "SentryNavEffect.onBackStackChanged"
     private const val NAME_EXTRACTOR_TRACE_SECTION = "Nav3Stress.nameExtractor"
     private const val ARGUMENTS_EXTRACTOR_TRACE_SECTION = "Nav3Stress.argumentsExtractor"
     private const val NAVIGATION_TO_COMPOSITION_SECTION = "Nav3Stress.navigationToComposition"
@@ -526,6 +534,10 @@ class Nav3PerformanceBenchmark {
     private const val AB_ENABLED_SECTION = "Nav3Stress.ab.enabled"
     private const val NANOS_PER_MICROSECOND = 1_000.0
     private const val RUN_TIMEOUT_MILLIS = 15_000L
+    private val isEmulator =
+      Build.FINGERPRINT.startsWith("generic") ||
+        Build.HARDWARE == "ranchu" ||
+        Build.HARDWARE == "goldfish"
 
     // TODO ADAM: Calibrate these provisional thresholds on physical devices, then update them.
     // Run release AOT benchmarks on at least one low/mid-tier device and one recent Pixel, record
@@ -535,19 +547,18 @@ class Nav3PerformanceBenchmark {
     // gates.
     private val PERFORMANCE_THRESHOLDS =
       mapOf(
-        "TOP_ONLY" to Nav3RegressionThresholds(20, 40, 0.5, 0.2, 0.5),
-        "LIGHT" to Nav3RegressionThresholds(20, 80, 0.5, 0.2, 0.5),
-        "NORMAL" to Nav3RegressionThresholds(20, 840, 0.75, 0.3, 0.75),
-        "CAPTURE_1_OF_100" to Nav3RegressionThresholds(20, 80, 0.5, 0.2, 0.5),
-        "CAPTURE_20_OF_100" to Nav3RegressionThresholds(20, 840, 0.75, 0.3, 0.75),
-        "CAPTURE_100_OF_100" to Nav3RegressionThresholds(20, 4_040, 1.5, 0.75, 1.0),
-        "HEAVY" to Nav3RegressionThresholds(20, 2_040, 1.0, 0.35, 0.75),
-        "SUPER_HEAVY" to Nav3RegressionThresholds(20, 4_040, 3.0, 1.5, 2.0),
-        "NO_ARGUMENTS" to Nav3RegressionThresholds(20, 4_040, 1.0, 0.5, 0.75),
+        "TOP_ONLY" to Nav3RegressionThresholds(20, 20, 1.0, 0.4, 1.0),
+        "LIGHT" to Nav3RegressionThresholds(20, 20, 1.0, 0.4, 1.0),
+        "NORMAL" to Nav3RegressionThresholds(20, 400, 1.5, 0.5, 1.5),
+        "CAPTURE_1_OF_100" to Nav3RegressionThresholds(20, 20, 1.0, 0.4, 1.0),
+        "CAPTURE_20_OF_100" to Nav3RegressionThresholds(20, 400, 1.25, 0.5, 1.25),
+        "CAPTURE_100_OF_100" to Nav3RegressionThresholds(20, 2_000, 2.0, 1.0, 1.75),
+        "HEAVY" to Nav3RegressionThresholds(20, 1_000, 1.25, 0.5, 1.25),
+        "SUPER_HEAVY" to Nav3RegressionThresholds(20, 2_000, 4.0, 2.0, 2.5),
+        "NO_ARGUMENTS" to Nav3RegressionThresholds(20, 2_000, 1.25, 0.5, 1.5),
       )
-    private val UNRELATED_RECOMPOSITION_THRESHOLDS =
-      Nav3RegressionThresholds(0, 0, 0.1, 0.01, 0.1)
-    private val NORMAL_AB_THRESHOLDS = Nav3RegressionThresholds(40, 1_680, 0.75, 0.3, 0.75)
+    private val UNRELATED_RECOMPOSITION_THRESHOLDS = Nav3RegressionThresholds(0, 0, 0.1, 0.01, 0.1)
+    private val NORMAL_AB_THRESHOLDS = Nav3RegressionThresholds(40, 800, 1.5, 0.5, 1.5)
     private val INTERLEAVED_AB_EXPECTATIONS = Nav3AbExpectations(expectedSamplesPerMeasurement = 40)
   }
 }

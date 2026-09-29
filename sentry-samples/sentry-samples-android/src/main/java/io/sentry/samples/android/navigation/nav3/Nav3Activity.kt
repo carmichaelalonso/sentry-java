@@ -6,7 +6,6 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.os.Trace
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -341,9 +340,6 @@ private fun Nav3SampleApp(
     val extractorNanosBefore =
       performanceState.nameExtractorNanos + performanceState.argumentsExtractorNanos
     val startedAtNanos = System.nanoTime()
-    if (isPerformanceScenario) {
-      Trace.beginSection(performanceState.sentryNavEffectTraceSection())
-    }
     SentryNavEffect(
       backStack = sentryBackStack,
       options = sentryNavOptions,
@@ -351,7 +347,6 @@ private fun Nav3SampleApp(
       argumentsExtractor = argumentsExtractor,
     )
     if (isPerformanceScenario) {
-      Trace.endSection()
       performanceState.recordSentryNavEffect(
         durationNanos = System.nanoTime() - startedAtNanos,
         nameExtractorCallsBefore = nameExtractorCallsBefore,
