@@ -10,13 +10,6 @@ import io.sentry.SentryOptions
 import org.jetbrains.annotations.ApiStatus
 
 /**
- * TODO ADAM: TO VERIFY
- *
- * - Current PRs work correctly (via sample app).
- * - That SentryNavEffect still needs to be called before NavDisplay.
- * - Route*Extractor APIs + entryProvider wrapper next step.
- */
-/**
  * An effect for generating Sentry data from your Nav3 backstack. Configure it via [options] and
  * call it before you invoke your `NavDisplay`.
  *
@@ -82,17 +75,16 @@ import org.jetbrains.annotations.ApiStatus
 @Composable
 public fun <T : Any> SentryNavEffect(
   backStack: List<T>,
-  scopes: IScopes = ScopesAdapter.getInstance(),
+  nameExtractor: RouteNameExtractor<T>,
+  argumentsExtractor: RouteArgumentsExtractor<T>? = null,
   options: SentryNavOptions = SentryNavOptions(),
-  nameExtractor: (T) -> String,
-  argumentsExtractor: ((T) -> Map<String, Any?>)? = null,
 ) {
   SentryNavEffect(
     backStack = backStack,
-    nameExtractor = RouteNameExtractor(nameExtractor),
-    argumentsExtractor = argumentsExtractor?.let(::RouteArgumentsExtractor),
+    nameExtractor = nameExtractor,
+    argumentsExtractor = argumentsExtractor,
     options = options,
-    scopes = scopes,
+    scopes = ScopesAdapter.getInstance(),
   )
 }
 

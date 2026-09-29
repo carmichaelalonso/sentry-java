@@ -314,30 +314,29 @@ internal class NavigationPerformanceState(
     "$label: effect ${sentryNavEffectDurations.compactSummary()}, " +
       "first draw ${mutationToFirstDrawDurations.compactSummary()}"
 
-  fun diagnosticsSummary(currentRoute: String, backStack: String): String =
-    buildString {
-      appendLine("status=$benchmarkStatus")
-      appendLine("route=$currentRoute")
-      appendLine("tracked_stack=$backStack")
-      appendLine("recomposition_requests=$recompositionRequests")
-      appendLine("navigation_mutations=$navigationMutations")
-      appendLine("destination_changes=$destinationChanges")
-      appendLine("sentry_nav_effect_attempts=$sentryNavEffectAttempts")
-      appendLine("processed_calls=$sentryNavEffectProcessedCalls")
-      appendLine("captured_entries_resolved=$capturedEntriesResolved")
-      appendLine("name_extractor_calls=$nameExtractorCalls")
-      appendLine("arguments_extractor_calls=$argumentsExtractorCalls")
-      appendLine("name_extractor_avg=${nameExtractorAverageMicros()}")
-      appendLine("arguments_extractor_avg=${argumentsExtractorAverageMicros()}")
-      appendLine("sentry_nav_effect_duration=${sentryNavEffectDurationSummary()}")
-      appendLine("extractor_duration=${extractorDurationSummary()}")
-      appendLine("non_extractor_estimate=${nonExtractorDurationSummary()}")
-      appendLine("mutation_to_composition=${mutationToCompositionSummary()}")
-      appendLine("mutation_to_first_draw=${mutationToFirstDrawSummary()}")
-      appendLine("first_draws_over_8_3_ms=${firstDrawsOver8Millis()}")
-      appendLine("first_draws_over_16_7_ms=${firstDrawsOver16Millis()}")
-      comparisonResult?.let { append("ab_result=$it") }
-    }
+  fun diagnosticsSummary(currentRoute: String, backStack: String): String = buildString {
+    appendLine("status=$benchmarkStatus")
+    appendLine("route=$currentRoute")
+    appendLine("tracked_stack=$backStack")
+    appendLine("recomposition_requests=$recompositionRequests")
+    appendLine("navigation_mutations=$navigationMutations")
+    appendLine("destination_changes=$destinationChanges")
+    appendLine("sentry_nav_effect_attempts=$sentryNavEffectAttempts")
+    appendLine("processed_calls=$sentryNavEffectProcessedCalls")
+    appendLine("captured_entries_resolved=$capturedEntriesResolved")
+    appendLine("name_extractor_calls=$nameExtractorCalls")
+    appendLine("arguments_extractor_calls=$argumentsExtractorCalls")
+    appendLine("name_extractor_avg=${nameExtractorAverageMicros()}")
+    appendLine("arguments_extractor_avg=${argumentsExtractorAverageMicros()}")
+    appendLine("sentry_nav_effect_duration=${sentryNavEffectDurationSummary()}")
+    appendLine("extractor_duration=${extractorDurationSummary()}")
+    appendLine("non_extractor_estimate=${nonExtractorDurationSummary()}")
+    appendLine("mutation_to_composition=${mutationToCompositionSummary()}")
+    appendLine("mutation_to_first_draw=${mutationToFirstDrawSummary()}")
+    appendLine("first_draws_over_8_3_ms=${firstDrawsOver8Millis()}")
+    appendLine("first_draws_over_16_7_ms=${firstDrawsOver16Millis()}")
+    comparisonResult?.let { append("ab_result=$it") }
+  }
 
   private fun emitDiagnosticsSummary() {
     val surface = diagnosticsSurfaceName ?: return
@@ -642,7 +641,8 @@ internal fun NavigationPerformancePanel(
 ) {
   @Suppress("UNUSED_EXPRESSION") state.displayRevision
 
-  val diagnosticsSummary = state.diagnosticsSummary(currentRoute = currentRoute, backStack = backStack)
+  val diagnosticsSummary =
+    state.diagnosticsSummary(currentRoute = currentRoute, backStack = backStack)
 
   LaunchedEffect(state.autoRecompose) {
     while (state.autoRecompose) {
@@ -1037,15 +1037,13 @@ private fun PerfInfoRow(label: String, value: String, tag: String? = null) {
         label,
         fontWeight = FontWeight.Bold,
         modifier =
-          Modifier.weight(1f)
-            .then(if (tag != null) Modifier.testTag("${tag}_label") else Modifier),
+          Modifier.weight(1f).then(if (tag != null) Modifier.testTag("${tag}_label") else Modifier),
       )
       Spacer(Modifier.size(12.dp))
       Text(
         value,
         modifier =
-          Modifier.weight(1f)
-            .then(if (tag != null) Modifier.testTag("${tag}_value") else Modifier),
+          Modifier.weight(1f).then(if (tag != null) Modifier.testTag("${tag}_value") else Modifier),
       )
     }
   }
