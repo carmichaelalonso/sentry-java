@@ -13,10 +13,10 @@ import io.sentry.SpanStatus
 import io.sentry.TransactionContext
 import io.sentry.TransactionOptions
 import io.sentry.TypeCheckHint
+import io.sentry.compose.navigation3.BackStackConverter.RetentionPolicy
 import io.sentry.compose.navigation3.PreparedChange.BackStackHasNewTop
 import io.sentry.compose.navigation3.PreparedChange.BackStackHasSameTop
 import io.sentry.compose.navigation3.PreparedChange.BackStackIsEmpty
-import io.sentry.compose.navigation3.RouteTranslator.RetentionPolicy
 import io.sentry.protocol.App
 import io.sentry.protocol.TransactionNameSource
 import io.sentry.util.IntegrationUtils.addIntegrationToSdkVersion
@@ -53,10 +53,10 @@ private const val NAVIGATION_OP: String = "navigation"
 internal class BackStackObserver<T : Any>(
   private val scopes: IScopes,
   private val options: SentryNavOptions,
-  entryMappersProvider: BackStackEntryMappersProvider<T>,
+  entryMapper: ForwardingBackStackEntryMapper<T>,
 ) {
 
-  private val routeTranslator = RouteTranslator(entryMappersProvider, scopes.options.logger)
+  private val backStackConverter = BackStackConverter(entryMapper, scopes.options.logger)
 
   private val navTransaction = NavTransaction(scopes)
   private val navContext = NavContext(scopes, options)
@@ -65,7 +65,7 @@ internal class BackStackObserver<T : Any>(
 
   // Safe because the host back stack retains the current top entry strongly between updates.
   private var previousTopEntry: WeakReference<T>? = null
-  private var previousTopRoute: Route? = null
+  private var previousTopRoute: NormalizedBackStackEntry? = null
 
   private val areNavigationTransactionsEnabled: Boolean
     get() = scopes.options.isTracingEnabled && options.enableNavigationTransactions
@@ -150,8 +150,8 @@ internal class BackStackObserver<T : Any>(
   }
 
   /**
-   * Extracts Sentry-compatible data from the receiver (i.e., a list of host app back stack entries)
-   * in the form of a [BackStackData].
+   * Extracts Sentry-compatible data from the receiver (i.e., the host app back stack) in the form
+   * of a [BackStackData] instance.
    *
    * Throws if the receiver is empty.
    */
@@ -161,7 +161,7 @@ internal class BackStackObserver<T : Any>(
     val topEntry = this.last()
     val shouldCaptureBackStack = options.captureBackStack && options.maxCapturedBackStackEntries > 0
 
-    val entriesToTranslate =
+    val entriesToConvert =
       when {
         shouldCaptureBackStack ->
           // Reverse entries so they're displayed with the newest entry on top in the Sentry UI.
@@ -172,27 +172,27 @@ internal class BackStackObserver<T : Any>(
         else -> listOf(topEntry)
       }
 
-    val routes =
-      routeTranslator.translate(
-        backStackEntries = entriesToTranslate,
+    val normalizedEntries =
+      backStackConverter.convert(
+        backStack = entriesToConvert,
         retentionPolicy = RetentionPolicy.KEEP_FIRST,
       )
 
     return BackStackData(
       topEntry = topEntry,
-      topRoute = routes.first(),
-      capturedRoutes = if (shouldCaptureBackStack) routes else emptyList(),
+      topEntryNormalized = normalizedEntries.first(),
+      capturedEntriesNormalized = if (shouldCaptureBackStack) normalizedEntries else emptyList(),
     )
   }
 
   private fun handleNewTop(
     scope: IScope,
-    previousTop: Route?,
+    previousTop: NormalizedBackStackEntry?,
     currentBackStack: BackStackData<T>,
   ) {
-    val currentTopRoute = currentBackStack.topRoute
+    val currentTopRoute = currentBackStack.topEntryNormalized
 
-    navContext.update(scope, currentBackStack.capturedRoutes)
+    navContext.update(scope, currentBackStack.capturedEntriesNormalized)
 
     if (scopes.options.isEnableScreenTracking) {
       navScreen.update(scope, currentTopRoute)
@@ -202,7 +202,7 @@ internal class BackStackObserver<T : Any>(
       navBreadcrumbs.emit(
         from = previousTop,
         toEntry = currentBackStack.topEntry,
-        toRoute = currentBackStack.topRoute,
+        toRoute = currentBackStack.topEntryNormalized,
       )
     }
 
@@ -213,7 +213,7 @@ internal class BackStackObserver<T : Any>(
         .start(
           scope,
           currentTopRoute.name,
-          currentTopRoute.arguments,
+          currentTopRoute.properties,
         )
         ?.let { transaction -> navContext.updateTransaction(transaction, scope, currentBackStack) }
     } else {
@@ -221,12 +221,12 @@ internal class BackStackObserver<T : Any>(
       scope.withPropagationContext { scope.setPropagationContext(PropagationContext()) }
     }
 
-    storeAsPreviousTop(currentBackStack.topEntry, currentBackStack.topRoute)
+    storeAsPreviousTop(currentBackStack.topEntry, currentBackStack.topEntryNormalized)
   }
 
   private fun handleSameTop(scope: IScope, backStack: BackStackData<T>) {
-    navContext.update(scope, backStack.capturedRoutes)
-    storeAsPreviousTop(backStack.topEntry, backStack.topRoute)
+    navContext.update(scope, backStack.capturedEntriesNormalized)
+    storeAsPreviousTop(backStack.topEntry, backStack.topEntryNormalized)
   }
 
   private fun handleEmptyBackStack(scope: IScope) {
@@ -236,7 +236,7 @@ internal class BackStackObserver<T : Any>(
     clearPreviousTop()
   }
 
-  private fun storeAsPreviousTop(topEntry: T, topRoute: Route) {
+  private fun storeAsPreviousTop(topEntry: T, topRoute: NormalizedBackStackEntry) {
     previousTopEntry = WeakReference(topEntry)
     previousTopRoute = topRoute
   }
@@ -264,7 +264,7 @@ private sealed interface PreparedChange<out T : Any> {
    * The top of the back stack has changed, and one or more entries below it may have been updated.
    */
   data class BackStackHasNewTop<T : Any>(
-    val previousTop: Route?,
+    val previousTop: NormalizedBackStackEntry?,
     val backStack: BackStackData<T>,
   ) : PreparedChange<T>
 
@@ -275,12 +275,13 @@ private sealed interface PreparedChange<out T : Any> {
 /** Info extracted from the host app's back stack in a form suitable for Sentry data. */
 private data class BackStackData<T>(
   val topEntry: T,
-  val topRoute: Route,
+  val topEntryNormalized: NormalizedBackStackEntry,
   /**
-   * [Route]s representing the newest [SentryNavOption.maxCapturedBackStackEntries] entries from the
-   * host app's back stack. Possibly empty.
+   * [NormalizedBackStackEntry]s representing the newest
+   * [SentryNavOption.maxCapturedBackStackEntries] entries from the host app's back stack. Possibly
+   * empty.
    */
-  val capturedRoutes: List<Route>,
+  val capturedEntriesNormalized: List<NormalizedBackStackEntry>,
 )
 
 /** A helper class for managing nav transactions. */
@@ -380,7 +381,7 @@ private class NavContext(private val scopes: IScopes, private val options: Sentr
     private const val NAVIGATION_CONTEXT_KEY = "navigation"
   }
 
-  fun update(scope: IScope, backStackRoutes: List<Route>) {
+  fun update(scope: IScope, backStackRoutes: List<NormalizedBackStackEntry>) {
     if (backStackRoutes.isEmpty()) {
       clear(scope)
       return
@@ -413,17 +414,21 @@ private class NavContext(private val scopes: IScopes, private val options: Sentr
       val appContext =
         transaction.contexts.app ?: io.sentry.protocol.Contexts(scope.contexts).app ?: App()
 
-      appContext.viewNames = listOf(backStack.topRoute.name)
+      appContext.viewNames = listOf(backStack.topEntryNormalized.name)
       transaction.contexts.setApp(appContext)
     }
 
-    if (options.captureBackStack && backStack.capturedRoutes.isNotEmpty()) {
-      transaction.setContext(NAVIGATION_CONTEXT_KEY, backStack.capturedRoutes.toBackStackMap())
+    if (options.captureBackStack && backStack.capturedEntriesNormalized.isNotEmpty()) {
+      transaction.setContext(
+        NAVIGATION_CONTEXT_KEY,
+        backStack.capturedEntriesNormalized.toBackStackMap(),
+      )
     }
   }
 
   /** Builds the `{"backstack": [...]}` map bound under [NAVIGATION_CONTEXT_KEY]. */
-  private fun List<Route>.toBackStackMap(): Map<String, Any?> = mapOf(BACKSTACK_KEY to serialize())
+  private fun List<NormalizedBackStackEntry>.toBackStackMap(): Map<String, Any?> =
+    mapOf(BACKSTACK_KEY to serialize())
 }
 
 /** A helper class for updating the tracked screen name. */
@@ -431,7 +436,7 @@ private class NavScreen {
 
   private var lastScreenName: String? = null
 
-  fun update(scope: IScope, currentRoute: Route) {
+  fun update(scope: IScope, currentRoute: NormalizedBackStackEntry) {
     scope.screen = currentRoute.name
     lastScreenName = currentRoute.name
   }
@@ -449,9 +454,9 @@ private class NavScreen {
 private class NavBreadcrumbs(private val scopes: IScopes) {
 
   fun <T : Any> emit(
-    from: Route?,
+    from: NormalizedBackStackEntry?,
     toEntry: T,
-    toRoute: Route,
+    toRoute: NormalizedBackStackEntry,
   ) {
     val breadcrumb =
       Breadcrumb().apply {
@@ -460,14 +465,14 @@ private class NavBreadcrumbs(private val scopes: IScopes) {
 
         from?.let {
           data["from"] = it.name
-          if (it.arguments.isNotEmpty()) {
-            data["from_arguments"] = it.arguments
+          if (it.properties.isNotEmpty()) {
+            data["from_arguments"] = it.properties
           }
         }
 
         data["to"] = toRoute.name
-        if (toRoute.arguments.isNotEmpty()) {
-          data["to_arguments"] = toRoute.arguments
+        if (toRoute.properties.isNotEmpty()) {
+          data["to_arguments"] = toRoute.properties
         }
 
         level = INFO

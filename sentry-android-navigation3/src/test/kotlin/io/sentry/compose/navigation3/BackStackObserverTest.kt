@@ -97,7 +97,8 @@ class BackStackObserverTest {
             captureBackStack = config.captureBackStack
             maxCapturedBackStackEntries = config.maxCapturedBackStackEntries
           },
-        entryMappersProvider = { RouteExtractors(nameExtractor, argumentsExtractor) },
+        entryMapper =
+          ForwardingBackStackEntryMapper { RouteExtractors(nameExtractor, argumentsExtractor) },
       )
     }
 
@@ -647,18 +648,18 @@ class BackStackObserverTest {
     assertThat(fixture.startedTransactions).hasSize(2)
     val profileTransaction = fixture.startedTransactions.last()
     assertThat(profileTransaction.isFinished).isFalse()
-    assertThat(profileTransaction.name).isEqualTo(RouteTranslator.UNKNOWN_ROUTE_NAME)
+    assertThat(profileTransaction.name).isEqualTo(NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME)
     assertThat(fixture.scope.transaction).isSameInstanceAs(profileTransaction)
-    assertThat(fixture.scope.screen).isEqualTo(RouteTranslator.UNKNOWN_ROUTE_NAME)
+    assertThat(fixture.scope.screen).isEqualTo(NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME)
     assertThat(fixture.scope.contexts.app?.viewNames)
-      .isEqualTo(listOf(RouteTranslator.UNKNOWN_ROUTE_NAME))
+      .isEqualTo(listOf(NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME))
     assertThat(fixture.breadcrumbs).hasSize(2)
     assertThat(fixture.breadcrumbs.last().data)
-      .containsExactly("from", "/home", "to", RouteTranslator.UNKNOWN_ROUTE_NAME)
+      .containsExactly("from", "/home", "to", NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME)
     assertThat(fixture.scope.navigationBackStack())
       .isEqualTo(
         listOf(
-          mapOf("route" to RouteTranslator.UNKNOWN_ROUTE_NAME),
+          mapOf("route" to NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME),
           mapOf("route" to "/home"),
         )
       )
@@ -670,24 +671,24 @@ class BackStackObserverTest {
     assertThat(fixture.startedTransactions).hasSize(3)
     val cartTransaction = fixture.startedTransactions.last()
     assertThat(cartTransaction.isFinished).isFalse()
-    assertThat(cartTransaction.name).isEqualTo(RouteTranslator.UNKNOWN_ROUTE_NAME)
+    assertThat(cartTransaction.name).isEqualTo(NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME)
     assertThat(fixture.scope.transaction).isSameInstanceAs(cartTransaction)
-    assertThat(fixture.scope.screen).isEqualTo(RouteTranslator.UNKNOWN_ROUTE_NAME)
+    assertThat(fixture.scope.screen).isEqualTo(NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME)
     assertThat(fixture.scope.contexts.app?.viewNames)
-      .isEqualTo(listOf(RouteTranslator.UNKNOWN_ROUTE_NAME))
+      .isEqualTo(listOf(NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME))
     assertThat(fixture.breadcrumbs).hasSize(3)
     assertThat(fixture.breadcrumbs.last().data)
       .containsExactly(
         "from",
-        RouteTranslator.UNKNOWN_ROUTE_NAME,
+        NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME,
         "to",
-        RouteTranslator.UNKNOWN_ROUTE_NAME,
+        NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME,
       )
     assertThat(fixture.scope.navigationBackStack())
       .isEqualTo(
         listOf(
-          mapOf("route" to RouteTranslator.UNKNOWN_ROUTE_NAME),
-          mapOf("route" to RouteTranslator.UNKNOWN_ROUTE_NAME),
+          mapOf("route" to NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME),
+          mapOf("route" to NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME),
           mapOf("route" to "/home"),
         )
       )
@@ -706,13 +707,13 @@ class BackStackObserverTest {
     assertThat(fixture.scope.contexts.app?.viewNames).isEqualTo(listOf("/settings"))
     assertThat(fixture.breadcrumbs).hasSize(4)
     assertThat(fixture.breadcrumbs.last().data)
-      .containsExactly("from", RouteTranslator.UNKNOWN_ROUTE_NAME, "to", "/settings")
+      .containsExactly("from", NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME, "to", "/settings")
     assertThat(fixture.scope.navigationBackStack())
       .isEqualTo(
         listOf(
           mapOf("route" to "/settings"),
-          mapOf("route" to RouteTranslator.UNKNOWN_ROUTE_NAME),
-          mapOf("route" to RouteTranslator.UNKNOWN_ROUTE_NAME),
+          mapOf("route" to NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME),
+          mapOf("route" to NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME),
           mapOf("route" to "/home"),
         )
       )

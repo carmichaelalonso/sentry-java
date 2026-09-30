@@ -3,9 +3,9 @@ package io.sentry.compose.navigation3
 import com.google.common.truth.Truth.assertThat
 import io.sentry.ILogger
 import io.sentry.SentryLevel.WARNING
-import io.sentry.compose.navigation3.RouteTranslator.ArgumentSanitizer
-import io.sentry.compose.navigation3.RouteTranslator.RetentionPolicy
-import io.sentry.compose.navigation3.RouteTranslator.WarningState
+import io.sentry.compose.navigation3.BackStackConverter.PropertiesSanitizer
+import io.sentry.compose.navigation3.BackStackConverter.RetentionPolicy
+import io.sentry.compose.navigation3.BackStackConverter.WarningState
 import java.util.AbstractCollection
 import org.junit.Test
 import org.mockito.kotlin.clearInvocations
@@ -14,7 +14,7 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.times
 import org.mockito.kotlin.verify
 
-class RouteTranslatorTest {
+class BackStackConverterTest {
 
   private data class HomeRoute(val id: String = "home")
 
@@ -36,9 +36,10 @@ class RouteTranslatorTest {
   private fun getSut(
     nameExtractor: RouteNameExtractor<Any> = defaultNameExtractor,
     argumentsExtractor: RouteArgumentsExtractor<Any>? = null,
-  ): RouteTranslator<Any> =
-    RouteTranslator(
-      entryMappersProvider = { RouteExtractors(nameExtractor, argumentsExtractor) },
+  ): BackStackConverter<Any> =
+    BackStackConverter(
+      entryMapper =
+        ForwardingBackStackEntryMapper { RouteExtractors(nameExtractor, argumentsExtractor) },
       logger = logger,
     )
 
@@ -47,14 +48,38 @@ class RouteTranslatorTest {
     val sut = getSut()
 
     val routes =
-      sut.translate(
+      sut.convert(
         listOf(SettingsRoute("privacy"), ProfileRoute("123"), HomeRoute()),
         RetentionPolicy.KEEP_FIRST,
       )
 
     assertThat(routes)
-      .containsExactly(Route("/SettingsRoute"), Route("/ProfileRoute"), Route("/HomeRoute"))
+      .containsExactly(
+        NormalizedBackStackEntry("/SettingsRoute"),
+        NormalizedBackStackEntry("/ProfileRoute"),
+        NormalizedBackStackEntry("/HomeRoute"),
+      )
       .inOrder()
+  }
+
+  @Test
+  fun `formatName adds a leading slash when missing`() {
+    assertThat(NormalizedBackStackEntry.formatName("profile")).isEqualTo("/profile")
+  }
+
+  @Test
+  fun `formatName preserves an existing leading slash`() {
+    assertThat(NormalizedBackStackEntry.formatName("/profile")).isEqualTo("/profile")
+  }
+
+  @Test
+  fun `formatName trims whitespace`() {
+    assertThat(NormalizedBackStackEntry.formatName("  /profile  ")).isEqualTo("/profile")
+  }
+
+  @Test
+  fun `formatName returns empty for blank names`() {
+    assertThat(NormalizedBackStackEntry.formatName("  ")).isEmpty()
   }
 
   @Test
@@ -62,13 +87,17 @@ class RouteTranslatorTest {
     val sut = getSut()
 
     val routes =
-      sut.translate(
+      sut.convert(
         listOf(HomeRoute(), ProfileRoute("123"), SettingsRoute("privacy")),
         RetentionPolicy.KEEP_LAST,
       )
 
     assertThat(routes)
-      .containsExactly(Route("/HomeRoute"), Route("/ProfileRoute"), Route("/SettingsRoute"))
+      .containsExactly(
+        NormalizedBackStackEntry("/HomeRoute"),
+        NormalizedBackStackEntry("/ProfileRoute"),
+        NormalizedBackStackEntry("/SettingsRoute"),
+      )
       .inOrder()
   }
 
@@ -76,14 +105,14 @@ class RouteTranslatorTest {
   fun `translate returns empty routes for an empty back stack`() {
     val sut = getSut()
 
-    assertThat(sut.translate(emptyList(), RetentionPolicy.KEEP_FIRST)).isEmpty()
+    assertThat(sut.convert(emptyList(), RetentionPolicy.KEEP_FIRST)).isEmpty()
   }
 
   @Test
   fun `translate returns empty routes for an empty back stack when top entry is last`() {
     val sut = getSut()
 
-    assertThat(sut.translate(emptyList(), RetentionPolicy.KEEP_LAST)).isEmpty()
+    assertThat(sut.convert(emptyList(), RetentionPolicy.KEEP_LAST)).isEmpty()
   }
 
   @Test
@@ -104,13 +133,13 @@ class RouteTranslatorTest {
           }
       )
 
-    val routes = sut.translate(listOf(first, middle, last), RetentionPolicy.KEEP_FIRST)
+    val routes = sut.convert(listOf(first, middle, last), RetentionPolicy.KEEP_FIRST)
 
     assertThat(routes)
       .containsExactly(
-        Route("/SettingsRoute", mapOf("section" to "privacy")),
-        Route("/ProfileRoute"),
-        Route("/HomeRoute"),
+        NormalizedBackStackEntry("/SettingsRoute", mapOf("section" to "privacy")),
+        NormalizedBackStackEntry("/ProfileRoute"),
+        NormalizedBackStackEntry("/HomeRoute"),
       )
       .inOrder()
   }
@@ -133,13 +162,13 @@ class RouteTranslatorTest {
           }
       )
 
-    val routes = sut.translate(listOf(first, middle, last), RetentionPolicy.KEEP_LAST)
+    val routes = sut.convert(listOf(first, middle, last), RetentionPolicy.KEEP_LAST)
 
     assertThat(routes)
       .containsExactly(
-        Route("/HomeRoute"),
-        Route("/ProfileRoute"),
-        Route("/SettingsRoute", mapOf("section" to "privacy")),
+        NormalizedBackStackEntry("/HomeRoute"),
+        NormalizedBackStackEntry("/ProfileRoute"),
+        NormalizedBackStackEntry("/SettingsRoute", mapOf("section" to "privacy")),
       )
       .inOrder()
   }
@@ -161,13 +190,13 @@ class RouteTranslatorTest {
           }
       )
 
-    val routes = sut.translate(listOf(first, middle, last), RetentionPolicy.KEEP_FIRST)
+    val routes = sut.convert(listOf(first, middle, last), RetentionPolicy.KEEP_FIRST)
 
     assertThat(routes)
       .containsExactly(
-        Route("/ProductRoute", mapOf("productId" to "sku-1")),
-        Route("/ProfileRoute"),
-        Route("/ProductRoute"),
+        NormalizedBackStackEntry("/ProductRoute", mapOf("productId" to "sku-1")),
+        NormalizedBackStackEntry("/ProfileRoute"),
+        NormalizedBackStackEntry("/ProductRoute"),
       )
       .inOrder()
   }
@@ -189,13 +218,13 @@ class RouteTranslatorTest {
           }
       )
 
-    val routes = sut.translate(listOf(first, middle, last), RetentionPolicy.KEEP_LAST)
+    val routes = sut.convert(listOf(first, middle, last), RetentionPolicy.KEEP_LAST)
 
     assertThat(routes)
       .containsExactly(
-        Route("/ProductRoute"),
-        Route("/ProfileRoute"),
-        Route("/ProductRoute", mapOf("productId" to "sku-1")),
+        NormalizedBackStackEntry("/ProductRoute"),
+        NormalizedBackStackEntry("/ProfileRoute"),
+        NormalizedBackStackEntry("/ProductRoute", mapOf("productId" to "sku-1")),
       )
       .inOrder()
   }
@@ -215,15 +244,15 @@ class RouteTranslatorTest {
       )
 
     val routes =
-      sut.translate(
+      sut.convert(
         listOf(SettingsRoute("privacy"), ProfileRoute("123")),
         RetentionPolicy.KEEP_FIRST,
       )
 
     assertThat(routes)
       .containsExactly(
-        Route("/SettingsRoute"),
-        Route("/ProfileRoute", mapOf("userId" to "123")),
+        NormalizedBackStackEntry("/SettingsRoute"),
+        NormalizedBackStackEntry("/ProfileRoute", mapOf("userId" to "123")),
       )
       .inOrder()
   }
@@ -244,12 +273,12 @@ class RouteTranslatorTest {
       )
 
     val routes =
-      sut.translate(
+      sut.convert(
         listOf(SettingsRoute("privacy"), ProfileRoute("123")),
         RetentionPolicy.KEEP_FIRST,
       )
 
-    assertThat(routes.map(Route::serialize))
+    assertThat(routes.map(NormalizedBackStackEntry::serialize))
       .containsExactly(
         mapOf("route" to "/SettingsRoute", "args" to mapOf("section" to "privacy")),
         mapOf("route" to "/ProfileRoute"),
@@ -261,29 +290,29 @@ class RouteTranslatorTest {
   fun `extractRouteName normalizes a custom name with a leading slash`() {
     val sut = getSut(nameExtractor = { "profile" })
 
-    assertThat(sut.extractRouteName(ProfileRoute("123"), WarningState())).isEqualTo("/profile")
+    assertThat(sut.extractEntryName(ProfileRoute("123"), WarningState())).isEqualTo("/profile")
   }
 
   @Test
   fun `extractRouteName leaves leading slash on custom name if already present`() {
     val sut = getSut(nameExtractor = { "/profile" })
 
-    assertThat(sut.extractRouteName(ProfileRoute("123"), WarningState())).isEqualTo("/profile")
+    assertThat(sut.extractEntryName(ProfileRoute("123"), WarningState())).isEqualTo("/profile")
   }
 
   @Test
   fun `extractRouteName returns the configured name extractor result`() {
     val sut = getSut()
 
-    assertThat(sut.extractRouteName(HomeRoute(), WarningState())).isEqualTo("/HomeRoute")
+    assertThat(sut.extractEntryName(HomeRoute(), WarningState())).isEqualTo("/HomeRoute")
   }
 
   @Test
   fun `extractRouteName returns unknown when name extractor throws`() {
     val sut = getSut(nameExtractor = { error("boom") })
 
-    assertThat(sut.extractRouteName(HomeRoute(), WarningState()))
-      .isEqualTo(RouteTranslator.UNKNOWN_ROUTE_NAME)
+    assertThat(sut.extractEntryName(HomeRoute(), WarningState()))
+      .isEqualTo(NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME)
     verify(logger)
       .log(
         eq(WARNING),
@@ -296,8 +325,8 @@ class RouteTranslatorTest {
   fun `extractRouteName returns unknown when name extractor returns blank`() {
     val sut = getSut(nameExtractor = { "   " })
 
-    assertThat(sut.extractRouteName(HomeRoute(), WarningState()))
-      .isEqualTo(RouteTranslator.UNKNOWN_ROUTE_NAME)
+    assertThat(sut.extractEntryName(HomeRoute(), WarningState()))
+      .isEqualTo(NormalizedBackStackEntry.UNKNOWN_ENTRY_NAME)
     verify(logger)
       .log(
         eq(WARNING),
@@ -333,7 +362,7 @@ class RouteTranslatorTest {
           }
       )
 
-    assertThat(sut.extractRouteArguments(HomeRoute(), ArgumentSanitizer(logger, WarningState())))
+    assertThat(sut.extractEntryProperties(HomeRoute(), PropertiesSanitizer(logger, WarningState())))
       .isEqualTo(
         mapOf(
           "str" to "hello",
@@ -374,7 +403,7 @@ class RouteTranslatorTest {
           }
       )
 
-    assertThat(sut.extractRouteArguments(HomeRoute(), ArgumentSanitizer(logger, WarningState())))
+    assertThat(sut.extractEntryProperties(HomeRoute(), PropertiesSanitizer(logger, WarningState())))
       .isEqualTo(
         mapOf(
           "nested" to
@@ -392,7 +421,7 @@ class RouteTranslatorTest {
     val sut =
       getSut(argumentsExtractor = RouteArgumentsExtractor { _ -> mapOf("bad" to OpaqueValue()) })
 
-    assertThat(sut.extractRouteArguments(HomeRoute(), ArgumentSanitizer(logger, WarningState())))
+    assertThat(sut.extractEntryProperties(HomeRoute(), PropertiesSanitizer(logger, WarningState())))
       .isEqualTo(mapOf("bad" to "opaque-value"))
   }
 
@@ -414,7 +443,7 @@ class RouteTranslatorTest {
           }
       )
 
-    sut.translate(listOf(HomeRoute(), ProfileRoute("123")), RetentionPolicy.KEEP_FIRST)
+    sut.convert(listOf(HomeRoute(), ProfileRoute("123")), RetentionPolicy.KEEP_FIRST)
 
     verify(logger, times(1))
       .log(
@@ -438,10 +467,10 @@ class RouteTranslatorTest {
     val sut =
       getSut(argumentsExtractor = RouteArgumentsExtractor { _ -> mapOf("bad" to OpaqueValue()) })
 
-    sut.extractRouteArguments(HomeRoute(), ArgumentSanitizer(logger, WarningState()))
+    sut.extractEntryProperties(HomeRoute(), PropertiesSanitizer(logger, WarningState()))
     clearInvocations(logger)
 
-    sut.extractRouteArguments(HomeRoute(), ArgumentSanitizer(logger, WarningState()))
+    sut.extractEntryProperties(HomeRoute(), PropertiesSanitizer(logger, WarningState()))
 
     verify(logger, times(1))
       .log(
@@ -460,7 +489,7 @@ class RouteTranslatorTest {
   fun `extractRouteArguments returns empty if no arguments extractor`() {
     val sut = getSut(argumentsExtractor = null)
 
-    assertThat(sut.extractRouteArguments(HomeRoute(), ArgumentSanitizer(logger, WarningState())))
+    assertThat(sut.extractEntryProperties(HomeRoute(), PropertiesSanitizer(logger, WarningState())))
       .isEmpty()
   }
 
@@ -468,7 +497,7 @@ class RouteTranslatorTest {
   fun `extractRouteArguments returns empty when arguments extractor throws`() {
     val sut = getSut(argumentsExtractor = { error("boom") })
 
-    assertThat(sut.extractRouteArguments(HomeRoute(), ArgumentSanitizer(logger, WarningState())))
+    assertThat(sut.extractEntryProperties(HomeRoute(), PropertiesSanitizer(logger, WarningState())))
       .isEmpty()
     verify(logger)
       .log(
@@ -486,7 +515,7 @@ class RouteTranslatorTest {
     val sut =
       getSut(argumentsExtractor = RouteArgumentsExtractor { _ -> mapOf("cyclic" to cyclic) })
 
-    assertThat(sut.extractRouteArguments(HomeRoute(), ArgumentSanitizer(logger, WarningState())))
+    assertThat(sut.extractEntryProperties(HomeRoute(), PropertiesSanitizer(logger, WarningState())))
       .isEmpty()
   }
 
@@ -499,7 +528,7 @@ class RouteTranslatorTest {
       getSut(argumentsExtractor = RouteArgumentsExtractor { _ -> mapOf("nested" to nested) })
 
     assertThat(
-        sut.extractRouteArguments(ProfileRoute("123"), ArgumentSanitizer(logger, WarningState()))
+        sut.extractEntryProperties(ProfileRoute("123"), PropertiesSanitizer(logger, WarningState()))
       )
       .isEmpty()
   }
@@ -511,7 +540,7 @@ class RouteTranslatorTest {
         argumentsExtractor = RouteArgumentsExtractor { _ -> mapOf("values" to List(1_001) { it }) }
       )
 
-    assertThat(sut.extractRouteArguments(HomeRoute(), ArgumentSanitizer(logger, WarningState())))
+    assertThat(sut.extractEntryProperties(HomeRoute(), PropertiesSanitizer(logger, WarningState())))
       .isEmpty()
   }
 
@@ -532,7 +561,7 @@ class RouteTranslatorTest {
     val sut =
       getSut(argumentsExtractor = RouteArgumentsExtractor { _ -> mapOf("values" to values) })
 
-    assertThat(sut.extractRouteArguments(HomeRoute(), ArgumentSanitizer(logger, WarningState())))
+    assertThat(sut.extractEntryProperties(HomeRoute(), PropertiesSanitizer(logger, WarningState())))
       .isEqualTo(mapOf("values" to listOf(1, 2)))
     assertThat(values.wasSizeRead).isFalse()
   }

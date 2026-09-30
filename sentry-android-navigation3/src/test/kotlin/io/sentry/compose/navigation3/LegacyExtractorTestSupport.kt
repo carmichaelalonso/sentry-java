@@ -3,6 +3,7 @@ package io.sentry.compose.navigation3
 import androidx.compose.runtime.Composable
 import io.sentry.IScopes
 
+// TODO ADAM: Remove?
 fun interface RouteNameExtractor<T : Any> {
   fun extract(backStackEntry: T): String
 }
@@ -14,12 +15,13 @@ fun interface RouteArgumentsExtractor<T : Any> {
 internal class RouteExtractors<T : Any>(
   private val nameExtractor: RouteNameExtractor<T>,
   private val argumentsExtractor: RouteArgumentsExtractor<T>?,
-) :
-  BackStackEntryMappers<T>(
-    BackStackEntryMapper { entry ->
-      BackStackEntryInfo(nameExtractor.extract(entry), argumentsExtractor?.extract(entry))
-    }
-  )
+) : BackStackEntryMapper<T> {
+  override fun map(backStackEntry: T): BackStackEntryInfo =
+    BackStackEntryInfo(
+      nameExtractor.extract(backStackEntry),
+      argumentsExtractor?.extract(backStackEntry),
+    )
+}
 
 @Composable
 internal fun <T : Any> SentryNavEffect(
