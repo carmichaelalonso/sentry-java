@@ -105,7 +105,7 @@ internal fun <T : Any> SentryNavEffect(
       BackStackObserver(
         scopes = scopes,
         options = options,
-        extractors = { routeExtractors.value },
+        extractorsProvider = { routeExtractors.value },
       )
     }
 

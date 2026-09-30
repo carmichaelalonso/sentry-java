@@ -11,7 +11,7 @@ import org.jetbrains.annotations.TestOnly
  *
  * **Exception handling policy**
  *
- * Invocations of host-provided [extractors] and sanitization of host-defined arguments are
+ * Invocations of host-provided [extractorsProvider] and sanitization of host-defined arguments are
  * protected by broad `try-catch` clauses, as each may throw arbitrary exceptions. We avoid failing
  * fast on the assumption that navigation telemetry is supplemental from host apps' perspective, and
  * that falling back to an `/unknown` route name or losing an argument map is preferable to
@@ -19,12 +19,12 @@ import org.jetbrains.annotations.TestOnly
  *
  * **Threading policy**
  *
- * This class performs work synchronously on the calling thread. Host-provided [extractors] are
+ * This class performs work synchronously on the calling thread. Host-provided [RouteExtractors] are
  * invoked on that same thread and should remain small, non-blocking, and safe for the caller's
  * threading context.
  */
 internal class RouteTranslator<T : Any>(
-  private val extractors: () -> RouteExtractors<T>,
+  private val extractorsProvider: RouteExtractorsProvider<T>,
   private val logger: ILogger,
 ) {
 
@@ -69,7 +69,7 @@ internal class RouteTranslator<T : Any>(
   fun extractRouteName(backStackEntry: T, warningState: WarningState): String {
     val name: String? =
       try {
-        extractors.invoke().getName(backStackEntry)
+        extractorsProvider.get().getName(backStackEntry)
       } catch (t: Throwable) {
         // Route name extractors are host app callbacks.
         ExceptionUtils.rethrowIfFatal(t)
@@ -101,7 +101,7 @@ internal class RouteTranslator<T : Any>(
   ): Map<String, Any?> {
     val raw =
       try {
-        extractors.invoke().getArguments(backStackEntry) ?: return emptyMap()
+        extractorsProvider.get().getArguments(backStackEntry) ?: return emptyMap()
       } catch (t: Throwable) {
         // Route argument extractors are host app callbacks.
         ExceptionUtils.rethrowIfFatal(t)
@@ -185,7 +185,7 @@ internal class RouteTranslator<T : Any>(
     private fun sanitizeMap(value: Map<*, *>, depth: Int): Map<String, Any?> {
       enter(value)
       try {
-        val sanitized = LinkedHashMap<String, Any?>()
+        val sanitized = mutableMapOf<String, Any?>()
         for ((key, childValue) in value) {
           sanitized[key.toString()] = sanitizeValue(childValue, depth + 1)
         }

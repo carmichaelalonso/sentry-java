@@ -53,10 +53,10 @@ private const val NAVIGATION_OP: String = "navigation"
 internal class BackStackObserver<T : Any>(
   private val scopes: IScopes,
   private val options: SentryNavOptions,
-  extractors: () -> RouteExtractors<T>,
+  extractorsProvider: RouteExtractorsProvider<T>,
 ) {
 
-  private val routeTranslator = RouteTranslator(extractors, scopes.options.logger)
+  private val routeTranslator = RouteTranslator(extractorsProvider, scopes.options.logger)
 
   private val navTransaction = NavTransaction(scopes)
   private val navContext = NavContext(scopes, options)

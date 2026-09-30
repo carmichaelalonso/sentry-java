@@ -141,3 +141,20 @@ internal class RouteExtractors<T : Any>(
     argumentsExtractor?.extract(backStackEntry)
   }
 }
+
+/**
+ * Returns the [RouteExtractors] currently in effect for the host app's back stack.
+ *
+ * Using a lazily evaluated provider lets us separate two concerns:
+ *
+ * 1. the lifetime of a consumer that tracks navigation state over time (e.g., [BackStackObserver]);
+ *    and
+ * 2. the lifetime of the host app-defined lambdas used to map back stack entries to displayable
+ *    Sentry data.
+ *
+ * Without that separation, a long-lived consumer would have to choose between holding stale mapping
+ * logic or recreating its own state whenever the mappers changed.
+ */
+internal interface RouteExtractorsProvider<T : Any> {
+  fun get(): RouteExtractors<T>
+}

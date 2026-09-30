@@ -97,7 +97,7 @@ class BackStackObserverTest {
             captureBackStack = config.captureBackStack
             maxCapturedBackStackEntries = config.maxCapturedBackStackEntries
           },
-        extractors = { RouteExtractors(nameExtractor, argumentsExtractor) },
+        extractorsProvider = { RouteExtractors(nameExtractor, argumentsExtractor) },
       )
     }
 

@@ -38,7 +38,7 @@ class RouteTranslatorTest {
     argumentsExtractor: RouteArgumentsExtractor<Any>? = null,
   ): RouteTranslator<Any> =
     RouteTranslator(
-      extractors = { RouteExtractors(nameExtractor, argumentsExtractor) },
+      extractorsProvider = { RouteExtractors(nameExtractor, argumentsExtractor) },
       logger = logger,
     )
 
