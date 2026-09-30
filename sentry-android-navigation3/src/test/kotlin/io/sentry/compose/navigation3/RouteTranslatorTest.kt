@@ -38,7 +38,7 @@ class RouteTranslatorTest {
     argumentsExtractor: RouteArgumentsExtractor<Any>? = null,
   ): RouteTranslator<Any> =
     RouteTranslator(
-      extractorsProvider = { RouteExtractors(nameExtractor, argumentsExtractor) },
+      entryMappersProvider = { RouteExtractors(nameExtractor, argumentsExtractor) },
       logger = logger,
     )
 
@@ -420,7 +420,7 @@ class RouteTranslatorTest {
       .log(
         eq(WARNING),
         eq(
-          "Nav3 argumentsExtractor returned unsupported value of type %s while processing this " +
+          "Nav3 backStackEntryMapper returned unsupported argument value of type %s while processing this " +
             "back stack update. Falling back to toString(). Use String, CharSequence, Char, " +
             "Number, Boolean, Enum, Map, Collection, object Array, and primitive array values " +
             "for reliable results."
@@ -447,7 +447,7 @@ class RouteTranslatorTest {
       .log(
         eq(WARNING),
         eq(
-          "Nav3 argumentsExtractor returned unsupported value of type %s while processing this " +
+          "Nav3 backStackEntryMapper returned unsupported argument value of type %s while processing this " +
             "back stack update. Falling back to toString(). Use String, CharSequence, Char, " +
             "Number, Boolean, Enum, Map, Collection, object Array, and primitive array values " +
             "for reliable results."

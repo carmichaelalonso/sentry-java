@@ -11,7 +11,7 @@ import org.jetbrains.annotations.TestOnly
  *
  * **Exception handling policy**
  *
- * Invocations of host-provided [extractorsProvider] and sanitization of host-defined arguments are
+ * Invocations of host-provided [entryMappersProvider] and sanitization of host-defined arguments are
  * protected by broad `try-catch` clauses, as each may throw arbitrary exceptions. We avoid failing
  * fast on the assumption that navigation telemetry is supplemental from host apps' perspective, and
  * that falling back to an `/unknown` route name or losing an argument map is preferable to
@@ -19,12 +19,12 @@ import org.jetbrains.annotations.TestOnly
  *
  * **Threading policy**
  *
- * This class performs work synchronously on the calling thread. Host-provided [RouteExtractors] are
- * invoked on that same thread and should remain small, non-blocking, and safe for the caller's
- * threading context.
+ * This class performs work synchronously on the calling thread. Host-provided
+ * [BackStackEntryMapper]s are invoked on that same thread and should remain small, non-blocking,
+ * and safe for the caller's threading context.
  */
 internal class RouteTranslator<T : Any>(
-  private val extractorsProvider: RouteExtractorsProvider<T>,
+  private val entryMappersProvider: BackStackEntryMappersProvider<T>,
   private val logger: ILogger,
 ) {
 
@@ -46,64 +46,63 @@ internal class RouteTranslator<T : Any>(
 
     for (index in indicesInPolicyOrder) {
       val entry = backStackEntries[index]
-      routes[index] =
-        Route(
-          name = extractRouteName(entry, warningState),
-          arguments = extractRouteArguments(entry, sanitizer),
-        )
+      routes[index] = extractRoute(entry, sanitizer, warningState)
     }
 
     return routes.requireNoNulls()
   }
 
-  /**
-   * Returns a route name for the provided [backStackEntry], based on this translator's
-   * [name extractor][RouteExtractors.nameExtractor].
-   *
-   * The returned name is normalized to always include a leading slash. E.g., both `PromoDialog` and
-   * `/PromoDialog` are resolved to `/PromoDialog`. (Doing so maintains parity with our Nav2
-   * convention.)
-   */
+  @Suppress("TooGenericExceptionCaught")
+  private fun extractRoute(
+    backStackEntry: T,
+    sanitizer: ArgumentSanitizer,
+    warningState: WarningState,
+  ): Route {
+    val info =
+      try {
+        entryMappersProvider.get().map(backStackEntry)
+      } catch (t: Throwable) {
+        ExceptionUtils.rethrowIfFatal(t)
+        warningState.logMapperFailureWarning(logger, t)
+        return Route(UNKNOWN_ROUTE_NAME)
+      }
+
+    val normalizedName = info.name.trim().takeUnless { it.isEmpty() }?.removePrefix("/")
+    if (normalizedName == null) {
+      warningState.logInvalidRouteNameWarning(logger)
+      return Route(UNKNOWN_ROUTE_NAME)
+    }
+
+    val arguments = info.arguments?.let(sanitizer::sanitizeEntry) ?: emptyMap()
+    return Route("/$normalizedName", arguments)
+  }
+
   @TestOnly
   @Suppress("TooGenericExceptionCaught")
   fun extractRouteName(backStackEntry: T, warningState: WarningState): String {
-    val name: String? =
+    val info =
       try {
-        extractorsProvider.get().getName(backStackEntry)
+        entryMappersProvider.get().map(backStackEntry)
       } catch (t: Throwable) {
-        // Route name extractors are host app callbacks.
         ExceptionUtils.rethrowIfFatal(t)
         warningState.logNameExtractorFailureWarning(logger, t)
         return UNKNOWN_ROUTE_NAME
       }
-
-    val normalizedName = name?.trim()?.takeUnless { it.isEmpty() }?.removePrefix("/")
+    val normalizedName = info.name.trim().takeUnless { it.isEmpty() }?.removePrefix("/")
     if (normalizedName == null) {
-      warningState.logInvalidRouteNameWarning(logger)
+      warningState.logLegacyInvalidRouteNameWarning(logger)
       return UNKNOWN_ROUTE_NAME
     }
-
     return "/$normalizedName"
   }
 
-  /**
-   * Returns the arguments for the provided [backStackEntry], based on this translator's
-   * [arguments extractor][RouteExtractors.argumentsExtractor].
-   *
-   * The arguments are sanitized before being returned, i.e., bounded in size and depth, and
-   * converted into a serializable form.
-   */
   @TestOnly
   @Suppress("TooGenericExceptionCaught")
-  fun extractRouteArguments(
-    backStackEntry: T,
-    sanitizer: ArgumentSanitizer,
-  ): Map<String, Any?> {
-    val raw =
+  fun extractRouteArguments(backStackEntry: T, sanitizer: ArgumentSanitizer): Map<String, Any?> {
+    val arguments =
       try {
-        extractorsProvider.get().getArguments(backStackEntry) ?: return emptyMap()
+        entryMappersProvider.get().map(backStackEntry).arguments ?: return emptyMap()
       } catch (t: Throwable) {
-        // Route argument extractors are host app callbacks.
         ExceptionUtils.rethrowIfFatal(t)
         logger.log(
           WARNING,
@@ -112,8 +111,7 @@ internal class RouteTranslator<T : Any>(
         )
         return emptyMap()
       }
-
-    return sanitizer.sanitizeEntry(raw)
+    return sanitizer.sanitizeEntry(arguments)
   }
 
   /**
@@ -315,7 +313,7 @@ internal class RouteTranslator<T : Any>(
   internal class WarningState {
     private var hasLoggedUnsupportedValueWarning = false
     private var hasLoggedInvalidRouteNameWarning = false
-    private var hasLoggedNameExtractorFailureWarning = false
+    private var hasLoggedMapperFailureWarning = false
 
     fun logUnsupportedValueWarning(typeName: String?, logger: ILogger) {
       if (hasLoggedUnsupportedValueWarning) {
@@ -324,7 +322,7 @@ internal class RouteTranslator<T : Any>(
 
       logger.log(
         WARNING,
-        "Nav3 argumentsExtractor returned unsupported value of type %s while processing this back " +
+        "Nav3 backStackEntryMapper returned unsupported argument value of type %s while processing this back " +
           "stack update. Falling back to toString(). Use String, CharSequence, Char, Number, " +
           "Boolean, Enum, Map, Collection, object Array, and primitive array values for reliable " +
           "results.",
@@ -340,23 +338,39 @@ internal class RouteTranslator<T : Any>(
 
       logger.log(
         WARNING,
-        "Nav3 nameExtractor returned a blank route name while processing this back stack update. " +
+        "Nav3 backStackEntryMapper returned a blank route name while processing this back stack update. " +
           "Using /unknown instead.",
       )
       hasLoggedInvalidRouteNameWarning = true
     }
 
-    fun logNameExtractorFailureWarning(logger: ILogger, throwable: Throwable) {
-      if (hasLoggedNameExtractorFailureWarning) {
+    fun logLegacyInvalidRouteNameWarning(logger: ILogger) {
+      logger.log(
+        WARNING,
+        "Nav3 nameExtractor returned a blank route name while processing this back stack update. " +
+          "Using /unknown instead.",
+      )
+    }
+
+    fun logMapperFailureWarning(logger: ILogger, throwable: Throwable) {
+      if (hasLoggedMapperFailureWarning) {
         return
       }
 
       logger.log(
         WARNING,
+        "Nav3 backStackEntryMapper threw while resolving a route. Using /unknown without arguments instead.",
+        throwable,
+      )
+      hasLoggedMapperFailureWarning = true
+    }
+
+    fun logNameExtractorFailureWarning(logger: ILogger, throwable: Throwable) {
+      logger.log(
+        WARNING,
         "Nav3 nameExtractor threw while resolving a route name. Using /unknown instead.",
         throwable,
       )
-      hasLoggedNameExtractorFailureWarning = true
     }
   }
 }

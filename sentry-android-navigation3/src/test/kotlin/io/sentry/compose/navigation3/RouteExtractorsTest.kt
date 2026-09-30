@@ -6,66 +6,39 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class RouteExtractorsTest {
-
   private data class HomeRoute(val id: String = "home")
 
   private data class ProfileRoute(val userId: String)
 
-  private val defaultNameExtractor = RouteNameExtractor<HomeRoute> { it.id }
-
   @Test
-  fun `getArguments returns null when no arguments extractor is configured`() {
-    val sut = RouteExtractors(nameExtractor = defaultNameExtractor, argumentsExtractor = null)
+  fun `mapper returns info without allocating arguments when omitted`() {
+    val sut = BackStackEntryMappers(BackStackEntryMapper<HomeRoute> { BackStackEntryInfo(it.id) })
 
-    assertThat(sut.getArguments(HomeRoute())).isNull()
+    assertThat(sut.map(HomeRoute())).isEqualTo(BackStackEntryInfo("home"))
+    assertThat(sut.map(HomeRoute()).arguments).isNull()
   }
 
   @Test
-  fun `getName delegates to the configured extractor`() {
+  fun `mapper returns name and arguments together`() {
     val route = ProfileRoute("123")
     val sut =
-      RouteExtractors<ProfileRoute>(
-        nameExtractor = RouteNameExtractor { entry -> "profile-${entry.userId}" },
-        argumentsExtractor = null,
+      BackStackEntryMappers(
+        BackStackEntryMapper<ProfileRoute> { entry ->
+          BackStackEntryInfo("profile-${entry.userId}", mapOf("userId" to entry.userId))
+        }
       )
 
-    assertThat(sut.getName(route)).isEqualTo("profile-123")
+    assertThat(sut.map(route))
+      .isEqualTo(BackStackEntryInfo("profile-123", mapOf("userId" to "123")))
   }
 
   @Test
-  fun `getArguments delegates to the configured extractor`() {
-    val route = ProfileRoute("123")
-    val sut =
-      RouteExtractors<ProfileRoute>(
-        nameExtractor = RouteNameExtractor { entry -> entry.userId },
-        argumentsExtractor = RouteArgumentsExtractor { entry -> mapOf("userId" to entry.userId) },
-      )
-
-    assertThat(sut.getArguments(route)).isEqualTo(mapOf("userId" to "123"))
-  }
-
-  @Test
-  fun `getName hides extractor reads from snapshot observation`() {
+  fun `mapper hides reads from snapshot observation`() {
     val routeName = mutableStateOf("home")
     val sut =
-      RouteExtractors<HomeRoute>(
-        nameExtractor = RouteNameExtractor { routeName.value },
-        argumentsExtractor = null,
-      )
+      BackStackEntryMappers(BackStackEntryMapper<HomeRoute> { BackStackEntryInfo(routeName.value) })
 
-    assertThat(observeReads { sut.getName(HomeRoute()) }).isEqualTo(0)
-  }
-
-  @Test
-  fun `getArguments hides extractor reads from snapshot observation`() {
-    val argumentValue = mutableStateOf("123")
-    val sut =
-      RouteExtractors<HomeRoute>(
-        nameExtractor = defaultNameExtractor,
-        argumentsExtractor = RouteArgumentsExtractor { mapOf("userId" to argumentValue.value) },
-      )
-
-    assertThat(observeReads { sut.getArguments(HomeRoute()) }).isEqualTo(0)
+    assertThat(observeReads { sut.map(HomeRoute()) }).isEqualTo(0)
   }
 
   private fun observeReads(block: () -> Unit): Int {

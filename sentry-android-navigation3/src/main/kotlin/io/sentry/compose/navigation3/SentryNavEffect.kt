@@ -24,8 +24,9 @@ import org.jetbrains.annotations.ApiStatus
  *    // get attributed to the appropriate nav transaction.
  *    SentryNavEffect(
  *      backStack = navBackStack,
- *      nameExtractor = { route -> route.extractName() },
- *      argumentsExtractor = { route -> route.extractArgument() },
+ *      backStackEntryMapper = { entry ->
+ *        BackStackEntryInfo(entry.toName(), entry.extractArguments())
+ *      },
  *      options = SentryNavOptions(),
  *    )
  *
@@ -65,9 +66,8 @@ import org.jetbrains.annotations.ApiStatus
  * show up under the current destination's transaction.
  *
  * @param backStack The navigation backstack to observe.
- * @param nameExtractor Extracts a human-readable route name from each entry of the [backStack].
- * @param argumentsExtractor Optional extractor for a map of argument name -> argument values from
- *   each entry of the [backStack]. If not provided, no arguments are attached.
+ * @param backStackEntryMapper Maps each entry of the [backStack] to a human-readable route name and
+ *   optional argument name -> argument values.
  * @param options The kinds of navigation info this effect should record.
  */
 @ApiStatus.Experimental
@@ -76,14 +76,12 @@ import org.jetbrains.annotations.ApiStatus
 @Suppress("FunctionNaming")
 public fun <T : Any> SentryNavEffect(
   backStack: List<T>,
-  nameExtractor: RouteNameExtractor<T>,
-  argumentsExtractor: RouteArgumentsExtractor<T>? = null,
+  backStackEntryMapper: BackStackEntryMapper<T>,
   options: SentryNavOptions = SentryNavOptions(),
 ) {
   SentryNavEffect(
     backStack = backStack,
-    nameExtractor = nameExtractor,
-    argumentsExtractor = argumentsExtractor,
+    backStackEntryMapper = backStackEntryMapper,
     options = options,
     scopes = ScopesAdapter.getInstance(),
   )
@@ -93,19 +91,18 @@ public fun <T : Any> SentryNavEffect(
 @Suppress("FunctionNaming")
 internal fun <T : Any> SentryNavEffect(
   backStack: List<T>,
-  nameExtractor: RouteNameExtractor<T>,
-  argumentsExtractor: RouteArgumentsExtractor<T>? = null,
+  backStackEntryMapper: BackStackEntryMapper<T>,
   options: SentryNavOptions = SentryNavOptions(),
   scopes: IScopes,
 ) {
-  val routeExtractors = rememberUpdatedState(RouteExtractors(nameExtractor, argumentsExtractor))
+  val backStackEntryMappers = rememberUpdatedState(BackStackEntryMappers(backStackEntryMapper))
 
   val observer =
     remember(scopes, options) {
       BackStackObserver(
         scopes = scopes,
         options = options,
-        extractorsProvider = { routeExtractors.value },
+        entryMappersProvider = { backStackEntryMappers.value },
       )
     }
 

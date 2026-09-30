@@ -68,8 +68,8 @@ private constructor(
      * most recent). Set to `0` to capture no back stack entries.
      *
      * Note: Sentry resolves and sanitizes up to [maxCapturedBackStackEntries] names + argument maps
-     * whenever your back stack changes. Keep name and argument extractors lightweight, and reduce
-     * the max captured count if extractor work is unusually expensive.
+     * whenever your back stack changes. Keep the back stack mapper lightweight, and reduce the max
+     * captured count if mapper work is unusually expensive.
      */
     public var maxCapturedBackStackEntries: Int = DEFAULT_MAX_CAPTURED_BACK_STACK_ENTRIES
 

@@ -4,12 +4,25 @@ import androidx.compose.runtime.snapshots.Snapshot
 import org.jetbrains.annotations.ApiStatus
 
 /**
- * Extracts a human-readable route name from a back stack entry.
+ * The name and optional diagnostic arguments Sentry records for one back stack item.
+ *
+ * Leave [arguments] `null` when no arguments are wanted. This avoids allocating an empty map for
+ * destinations that only need a name.
+ */
+@ApiStatus.Experimental
+@ApiStatus.Internal
+public data class BackStackEntryInfo(
+  public val name: String,
+  public val arguments: Map<String, Any?>? = null,
+)
+
+/**
+ * Maps a back stack entry to the name and optional diagnostic arguments Sentry records.
  *
  * **Privacy / PII**
  *
- * Values returned from [extract] are ***not*** scrubbed by the Sentry SDK before being sent to
- * Sentry. Only return names that are known to be safe or have been pre-scrubbed.
+ * Values returned from [map] are ***not*** scrubbed by the Sentry SDK before being sent to Sentry.
+ * Only return names and arguments that are known to be safe or have been pre-scrubbed.
  *
  * **Choosing appropriate route names**
  *
@@ -24,45 +37,13 @@ import org.jetbrains.annotations.ApiStatus
  *
  * **Falls back to "/unknown"**
  *
- * If [extract] throws or returns a blank route name, Sentry records the destination as "/unknown".
+ * If [map] throws or returns a blank route name, Sentry records the destination as "/unknown".
  * Doing so signals that name extraction needs to be fixed while avoiding misleading gaps in
  * navigation data.
  *
- * For instance, if a user navigates from `/home -> /detail -> /settings`, but the name extractor
- * for `/detail` throws, the back stack record will be `/home -> /unknown -> /settings` rather than
+ * For instance, if a user navigates from `/home -> /detail -> /settings`, but the mapper for
+ * `/detail` throws, the back stack record will be `/home -> /unknown -> /settings` rather than
  * `/home -> /settings`.
- *
- * **Using kotlinx.serialization**
- *
- * If your back stack contains `@Serializable` route types, consider mapping each route type to a
- * stable serializer name. For instance:
- * ```kotlin
- * val nameExtractor = RouteNameExtractor<Any> { route ->
- *   when (route) {
- *     is HomeRoute -> HomeRoute.serializer().descriptor.serialName
- *     is ProfileRoute -> ProfileRoute.serializer().descriptor.serialName
- *     is SettingsRoute -> SettingsRoute.serializer().descriptor.serialName
- *   }
- * }
- * ```
- *
- * Doing so gives each route type a stable, non-obfuscated name while leaving per-route arguments to
- * [RouteArgumentsExtractor].
- */
-@ApiStatus.Experimental
-@ApiStatus.Internal
-public fun interface RouteNameExtractor<T : Any> {
-  public fun extract(backStackEntry: T): String
-}
-
-/**
- * Extracts diagnostic route arguments from a back stack entry as map of argument name -> argument
- * values.
- *
- * **Privacy / PII**
- *
- * Values returned from [extract] are ***not*** scrubbed by the Sentry SDK before being sent to
- * Sentry. Only return arguments that are known to be safe or have been pre-scrubbed.
  *
  * **Choosing appropriate route arguments**
  *
@@ -96,65 +77,61 @@ public fun interface RouteNameExtractor<T : Any> {
  *
  * **Falls back to `toString()` or nothing**
  *
- * All non-supported types are stringified via `toString()`. If [extract] throws, no arguments are
+ * All non-supported types are stringified via `toString()`. If [map] throws, no arguments are
  * recorded for the destination.
  *
  * **Using kotlinx.serialization**
  *
- * If your back stack contains `@Serializable` route types, avoid returning the entire route object
- * when it may be large, nested, or privacy-sensitive. Prefer a small set of diagnostic arguments
- * instead. For instance:
+ * If your back stack contains `@Serializable` route types, consider mapping each route type to a
+ * stable serializer name. For instance:
  * ```kotlin
- * val argumentsExtractor = RouteArgumentsExtractor<Any> { route ->
+ * val backStackItemMapper = BackStackEntryMapper<Any> { route ->
  *   when (route) {
- *     is HomeRoute -> emptyMap()
- *     is ProfileRoute -> mapOf("userId" to route.userId, "tab" to route.tab)
- *     is SettingsRoute -> mapOf("section" to route.section)
+ *     is HomeRoute -> BackStackEntryInfo(HomeRoute.serializer().descriptor.serialName)
+ *     is ProfileRoute -> BackStackEntryInfo(
+ *       name = ProfileRoute.serializer().descriptor.serialName,
+ *       arguments = mapOf("userId" to route.userId, "tab" to route.tab),
+ *     )
+ *     is SettingsRoute -> BackStackEntryInfo(
+ *       name = SettingsRoute.serializer().descriptor.serialName,
+ *       arguments = mapOf("section" to route.section),
+ *     )
  *   }
  * }
  * ```
+ *
+ * Doing so gives each route type a stable, non-obfuscated name while leaving per-route arguments to
+ * [BackStackEntryInfo].
+ *
+ * If your back stack contains `@Serializable` route types, avoid returning the entire route object
+ * when it may be large, nested, or privacy-sensitive. Prefer a small set of diagnostic arguments
+ * instead.
  */
 @ApiStatus.Experimental
 @ApiStatus.Internal
-public fun interface RouteArgumentsExtractor<T : Any> {
-  public fun extract(backStackEntry: T): Map<String, Any?>
+public fun interface BackStackEntryMapper<T : Any> {
+  public fun map(backStackEntry: T): BackStackEntryInfo
 }
 
-/**
- * Holds host app-defined extractors, which convert a back stack entry of type [T] into a route name
- * and a map of zero or more route arguments. Extracted values are eventually grouped into [Route]s
- * for display.
- *
- * Extractor invocations are hidden from Compose snapshot observation so they don't impact
- * invalidation of the recompose scope that reads them.
- */
-internal class RouteExtractors<T : Any>(
-  val nameExtractor: RouteNameExtractor<T>,
-  val argumentsExtractor: RouteArgumentsExtractor<T>?,
-) {
-
-  fun getName(backStackEntry: T): String = Snapshot.withoutReadObservation {
-    nameExtractor.extract(backStackEntry)
-  }
-
-  fun getArguments(backStackEntry: T): Map<String, Any?>? = Snapshot.withoutReadObservation {
-    argumentsExtractor?.extract(backStackEntry)
+internal open class BackStackEntryMappers<T : Any>(val mapper: BackStackEntryMapper<T>) {
+  fun map(backStackEntry: T): BackStackEntryInfo = Snapshot.withoutReadObservation {
+    mapper.map(backStackEntry)
   }
 }
 
 /**
- * Returns the [RouteExtractors] currently in effect for the host app's back stack.
+ * Returns the [BackStackEntryMappers] currently in effect for the host app's back stack.
  *
  * Using a lazily evaluated provider lets us separate two concerns:
  *
  * 1. the lifetime of a consumer that tracks navigation state over time (e.g., [BackStackObserver]);
  *    and
- * 2. the lifetime of the host app-defined lambdas used to map back stack entries to displayable
+ * 2. the lifetime of the host app-defined mapper used to map back stack entries to displayable
  *    Sentry data.
  *
  * Without that separation, a long-lived consumer would have to choose between holding stale mapping
- * logic or recreating its own state whenever the mappers changed.
+ * logic or recreating its own state whenever the mapper changed.
  */
-internal interface RouteExtractorsProvider<T : Any> {
-  fun get(): RouteExtractors<T>
+internal fun interface BackStackEntryMappersProvider<T : Any> {
+  fun get(): BackStackEntryMappers<T>
 }
